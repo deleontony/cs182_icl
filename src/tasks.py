@@ -61,6 +61,9 @@ def get_task_sampler(
         "relu_2nn_regression": Relu2nnRegression,
         "decision_tree": DecisionTree,
         "sine_regression": SineRegression,
+        "saw_regression": SawtoothRegression,
+        "triangle_wave_regression":TriangleWaveRegression,
+        "square_wave_regression":SquareWaveRegression,
     }
     if task_name in task_names_to_classes:
         task_cls = task_names_to_classes[task_name]
