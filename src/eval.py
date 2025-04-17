@@ -350,6 +350,8 @@ def baseline_names(name):
         return "XGBoost"
     if "mlp" in name.lower():
         return "MLP"
+    if "fourier" in name.lower():
+        return "Fourier"
     return name
 
 
