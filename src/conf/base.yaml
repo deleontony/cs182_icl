@@ -7,6 +7,9 @@ model:
     n_positions: 101
 
 training:
+    # seed: 42 
+    # Tony: I think its prob important to seed training, data generation, weight generation, etc. 
+    # but don't want to change code too much
     data: gaussian
     task_kwargs: {}
     batch_size: 64

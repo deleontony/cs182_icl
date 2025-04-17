@@ -28,7 +28,7 @@ def train_step(model, xs, ys, optimizer, loss_func):
     return loss.detach().item(), output.detach()
 
 
-def sample_seeds(total_seeds, count):
+def sample_seeds(total_seeds, count): #TODO: might want to save seeds?
     seeds = set()
     while len(seeds) < count:
         seeds.add(randint(0, total_seeds - 1))
