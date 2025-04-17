@@ -40,7 +40,10 @@ TASK_LIST = [
     "linear_classification",
     "relu_2nn_regression",
     "decision_tree",
-    "sine_regression"
+    "fourier_sine_regression",
+    "radial_sine_regression",
+    "linear_sine_regression",
+    "linear_modulo_regression"
 ]
 
 training_schema = {
