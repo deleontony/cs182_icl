@@ -475,3 +475,64 @@ class XGBoostModel:
             preds.append(pred)
 
         return torch.stack(preds, dim=1)
+    
+class MLP(nn.Module):
+    def __init__(self, input_size, hidden_size=64):
+        super(MLP, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class MLPModel:
+    def __init__(self):
+        self.name = "mlp"
+    
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cuda(), ys.cuda() #I'm basing this off of the GD model
+        
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+
+        for i in tqdm(inds):
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    train_xs, train_ys = xs[j, :i], ys[j, :i]
+
+                    input_size = train_xs.shape[1] if train_xs.ndim == 2 else 1
+                    train_xs = train_xs.view(-1, input_size).float()
+                    train_ys = train_ys.view(-1, 1).float()
+
+                    model = MLP(input_size)
+                    criterion = nn.MSELoss()
+                    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+                    # Simple training loop
+                    for epoch in range(50):  # or use early stopping
+                        model.train()
+                        optimizer.zero_grad()
+                        output = model(train_xs)
+                        loss = criterion(output, train_ys)
+                        loss.backward()
+                        optimizer.step()
+
+                    # Predict the next step
+                    test_x = xs[j, i:i+1].view(1, -1).float()
+                    model.eval()
+                    with torch.no_grad():
+                        y_pred = model(test_x)
+                        pred[j] = y_pred[0, 0].item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)

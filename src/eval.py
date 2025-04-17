@@ -348,6 +348,8 @@ def baseline_names(name):
         return "Greedy Tree Learning"
     if "xgboost" in name:
         return "XGBoost"
+    if "mlp" in name.lower():
+        return "MLP"
     return name
 
 
