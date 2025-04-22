@@ -37,6 +37,11 @@ relevant_model_names = {
         "3-Nearest Neighbors",
         "2-layer NN, GD",
     ],
+    "sine_regression": [
+        "Transformer",
+        "MLP",
+        "Fourier",
+    ],
 }
 
 

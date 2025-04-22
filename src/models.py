@@ -7,6 +7,7 @@ from sklearn.linear_model import LogisticRegression, Lasso
 import warnings
 from sklearn import tree
 import xgboost as xgb
+import numpy as np
 
 from base_models import NeuralNetwork, ParallelNetworks
 
@@ -471,6 +472,129 @@ class XGBoostModel:
                     test_x = xs[j, i : i + 1]
                     y_pred = clf.predict(test_x)
                     pred[j] = y_pred[0].item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)
+    
+class MLP(nn.Module):
+    def __init__(self, input_size, hidden_size=64):
+        super(MLP, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class MLPModel:
+    def __init__(self):
+        self.name = "mlp"
+    
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cuda(), ys.cuda() #I'm basing this off of the GD model
+        
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+
+        for i in tqdm(inds):
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    train_xs, train_ys = xs[j, :i], ys[j, :i]
+
+                    input_size = train_xs.shape[1] if train_xs.ndim == 2 else 1
+                    train_xs = train_xs.view(-1, input_size).float()
+                    train_ys = train_ys.view(-1, 1).float()
+
+                    model = MLP(input_size)
+                    criterion = nn.MSELoss()
+                    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+                    # Simple training loop
+                    for epoch in range(50):  # or use early stopping
+                        model.train()
+                        optimizer.zero_grad()
+                        output = model(train_xs)
+                        loss = criterion(output, train_ys)
+                        loss.backward()
+                        optimizer.step()
+
+                    # Predict the next step
+                    test_x = xs[j, i:i+1].view(1, -1).float()
+                    model.eval()
+                    with torch.no_grad():
+                        y_pred = model(test_x)
+                        pred[j] = y_pred[0, 0].item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)
+
+class FourierRegressionModel:
+    def __init__(self, num_terms=3):
+        self.name = "fourier"
+        self.num_terms = num_terms  # Number of sine/cosine pairs
+
+    def _design_matrix(self, t):
+        """
+        Build Fourier design matrix for input t.
+        t: (N,) tensor
+        returns: (N, 2K+1) tensor
+        """
+        t = t.view(-1, 1)
+        X = [torch.ones_like(t)]  # bias term
+        for k in range(1, self.num_terms + 1):
+            X.append(torch.cos(2 * np.pi * k * t))
+            X.append(torch.sin(2 * np.pi * k * t))
+        return torch.cat(X, dim=1)
+
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cpu(), ys.cpu()
+
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+
+        for i in tqdm(inds):
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    train_xs = xs[j, :i]
+                    train_ys = ys[j, :i]
+
+                    # Use time indices as inputs for Fourier features
+                    #t = torch.arange(i).float() / i  # normalized time [0, 1)
+
+                    #X = self._design_matrix(t)
+
+                    X = self._design_matrix(train_xs) #it depends if we want to use time indices as inputs for Fourier features. If we want xs, use xs
+                    y = train_ys.view(-1, 1)
+
+                    # Fit via least squares: beta = (X^T X)^(-1) X^T y
+                    try:
+                        beta, _ = torch.lstsq(y, X)  # legacy PyTorch < 1.9
+                        beta = beta[:X.shape[1]]
+                    except:
+                        # For modern PyTorch versions
+                        beta = torch.linalg.lstsq(X, y).solution
+
+                    # Predict at the next time step
+                    t_test = torch.tensor([(i) / (i + 1)]).float()
+                    X_test = self._design_matrix(t_test)
+                    y_pred = X_test @ beta
+                    pred[j] = y_pred[0, 0]
 
             preds.append(pred)
 
