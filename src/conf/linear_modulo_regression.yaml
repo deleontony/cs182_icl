@@ -9,6 +9,7 @@ training:
             end: 41
             inc: 2
             interval: 2000 
+    resume_id: ef14b05a-d15a-4418-a47d-1ca6be3df829
 
 out_dir: ../models/periodic/linear_modulo_regression
 

@@ -40,14 +40,22 @@ def train(model, args):
     curriculum = Curriculum(args.training.curriculum)
 
     starting_step = 0
-    state_path = os.path.join(args.out_dir, "state.pt")
-    if os.path.exists(state_path):
+    if args.training.task == "linear_modulo_regression": # crashed, had to fix
+        state_path = os.path.join(args.out_dir, "model_400000.pt")
         state = torch.load(state_path)
-        model.load_state_dict(state["model_state_dict"])
-        optimizer.load_state_dict(state["optimizer_state_dict"])
-        starting_step = state["train_step"]
-        for i in range(state["train_step"] + 1):
-            curriculum.update()
+    else:
+        state_path = os.path.join(args.out_dir, "state.pt")
+    if os.path.exists(state_path):
+        if args.training.task == "linear_modulo_regression": # crashed, had to fix
+            model.load_state_dict(torch.load(state_path))
+            starting_step = 400000
+        else:
+            state = torch.load(state_path)
+            model.load_state_dict(state["model_state_dict"])
+            optimizer.load_state_dict(state["optimizer_state_dict"])
+            starting_step = state["train_step"]
+            for i in range(state["train_step"] + 1):
+                curriculum.update()
 
     n_dims = model.n_dims
     bsize = args.training.batch_size

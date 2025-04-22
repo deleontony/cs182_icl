@@ -9,6 +9,7 @@ training:
             end: 41 #TODO: 41 or 101, need to figure out what this does
             inc: 2 #TODO: 2 or 5, need to figure out what this does
             interval: 2000 # always the same
+    resume_id: 9130cfcc-bc09-4887-ae64-2d0a869f8718
 
 out_dir: ../models/periodic/triangle_wave_regression
 

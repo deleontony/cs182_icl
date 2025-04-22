@@ -9,6 +9,7 @@ training:
             end: 101
             inc: 5
             interval: 2000 
+    resume_id: 1468ab06-745f-43e9-9795-77053ef5cabf
 
 out_dir: ../models/periodic/fourier_sine_regression
 

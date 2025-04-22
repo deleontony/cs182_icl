@@ -43,7 +43,7 @@ TASK_LIST = [
     "fourier_sine_regression",
     "radial_sine_regression",
     "linear_sine_regression",
-    "linear_modulo_regression"
+    "linear_modulo_regression",
     "saw_regression",
     "triangle_wave_regression",
     "square_wave_regression"

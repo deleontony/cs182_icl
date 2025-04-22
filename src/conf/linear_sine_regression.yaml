@@ -9,6 +9,7 @@ training:
             end: 41
             inc: 2
             interval: 2000 
+    resume_id: 1643cdec-59ca-4f8e-ae37-1f9c73c31d8a
 
 out_dir: ../models/periodic/linear_sine_regression
 

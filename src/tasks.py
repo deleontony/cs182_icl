@@ -307,7 +307,7 @@ class LinearModuloRegression(Task):
         divisor = self.divisor.to(xs_b.device) # (B, 1)
 
         dot = (xs_b @ w).squeeze(-1)  # (B, T)
-        mod_result = torch.remainder(dot + phase, divisor)  # (B, T)
+        mod_result = (dot + phase) % divisor  # (B, T)
 
         ys = amp * mod_result + offset  # (B, T)
         return ys * self.scale
@@ -333,212 +333,194 @@ class LinearModuloRegression(Task):
 
 class SawtoothRegression(Task):
     def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
-        """scale: a constant by which to scale the randomly sampled weights."""
-        super(SawtoothRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        super().__init__(n_dims, batch_size, pool_dict, seeds)
         self.scale = scale
 
-        #f(x[i]) = amp * sin(freq * x[i] + phase) + offset   for each i in n_dim
         if pool_dict is None and seeds is None:
-            self.amp = torch.randn(self.b_size, 1, self.n_dims)
-            self.freq = torch.randn(self.b_size, 1, self.n_dims)
-            self.phase = torch.randn(self.b_size, 1, self.n_dims)
-            self.offset = torch.randn(self.b_size, 1, self.n_dims)
+            self.w = torch.randn(batch_size, n_dims, 1)
+            self.amp = torch.randn(batch_size, 1)
+            self.phase = torch.randn(batch_size, 1)
+            self.offset = torch.randn(batch_size, 1)
+            self.divisor = torch.abs(torch.randn(batch_size, 1)) + 0.1
         elif seeds is not None:
-            self.amp = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.freq = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.phase = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.offset = torch.zeros(self.b_size, 1, self.n_dims, 1)
+            self.w = torch.zeros(batch_size, n_dims, 1)
+            self.amp = torch.zeros(batch_size, 1)
+            self.phase = torch.zeros(batch_size, 1)
+            self.offset = torch.zeros(batch_size, 1)
+            self.divisor = torch.zeros(batch_size, 1)
             generator = torch.Generator()
-            assert len(seeds) == self.b_size
             for i, seed in enumerate(seeds):
                 generator.manual_seed(seed)
-                self.amp[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.freq[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.phase[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.offset[i] = torch.randn(1, self.n_dims, generator=generator)
+                self.w[i] = torch.randn(n_dims, 1, generator=generator)
+                self.amp[i] = torch.randn(1, generator=generator)
+                self.phase[i] = torch.randn(1, generator=generator)
+                self.offset[i] = torch.randn(1, generator=generator)
+                self.divisor[i] = torch.abs(torch.randn(1, generator=generator)) + 0.1
         else:
-            assert all(k in pool_dict for k in ["amp", "freq", "phase", "offset"])
-            indices = torch.randperm(len(pool_dict["amp"]))[:batch_size]
-            self.amp = pool_dict["amp"][indices]
-            self.freq = pool_dict["freq"][indices]
-            self.phase = pool_dict["phase"][indices]
-            self.offset = pool_dict["offset"][indices]
-    
-    def evaluate(self, xs_b):
-        # xs_b: shape (B, T, D)
-        amp = self.amp.to(xs_b.device)        # (B, 1, D)
-        freq = self.freq.to(xs_b.device)      
+            idx = torch.randperm(len(pool_dict["w"]))[:batch_size]
+            self.w = pool_dict["w"][idx]
+            self.amp = pool_dict["amp"][idx]
+            self.phase = pool_dict["phase"][idx]
+            self.offset = pool_dict["offset"][idx]
+            self.divisor = pool_dict["divisor"][idx]
+
+    def evaluate(self, xs_b):  # (B, T, D)
+        w = self.w.to(xs_b.device)
+        amp = self.amp.to(xs_b.device)
         phase = self.phase.to(xs_b.device)
         offset = self.offset.to(xs_b.device)
+        divisor = self.divisor.to(xs_b.device)
 
-        # print(f"xs_b.shape = {xs_b.shape}")
-        # print(f"amp.shape = {amp.shape}")
-        # print(f"freq.shape = {freq.shape}")
-        # print(f"phase.shape = {phase.shape}")
-        # print(f"offset.shape = {offset.shape}")
-        
-        x = freq * xs_b + phase
+        dot = (xs_b @ w).squeeze(-1)  # (B, T)
+        saw = ((dot + phase) % divisor) / divisor
 
-        fxs = amp * (2 * (x / (2*torch.pi) - torch.floor(0.5 + x / (2*torch.pi)))) + offset  # (B, T, D)
-        # Sum across D (dim=2) to get scalar output per x
-        ys = fxs.sum(dim=2).squeeze(-1)  # (B, T)
+        ys = amp * saw + offset
         return ys * self.scale
-    
+
     @staticmethod
-    def generate_pool_dict(n_dims, num_tasks, **kwargs):  # ignore extra args
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):
         return {
-            "amp": torch.randn(num_tasks, 1, n_dims),
-            "freq": torch.randn(num_tasks, 1, n_dims),
-            "phase": torch.randn(num_tasks, 1, n_dims),
-            "offset": torch.randn(num_tasks, 1, n_dims),
+            "w": torch.randn(num_tasks, n_dims, 1),
+            "amp": torch.randn(num_tasks, 1),
+            "phase": torch.randn(num_tasks, 1),
+            "offset": torch.randn(num_tasks, 1),
+            "divisor": torch.abs(torch.randn(num_tasks, 1)) + 0.1,
         }
-    
+
     @staticmethod
     def get_metric():
         return squared_error
-    
+
     @staticmethod
     def get_training_metric():
         return mean_squared_error
+
     
 class TriangleWaveRegression(Task):
     def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
-        """scale: a constant by which to scale the randomly sampled weights."""
-        super(TriangleWaveRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        super().__init__(n_dims, batch_size, pool_dict, seeds)
         self.scale = scale
 
-        #f(x[i]) = amp * sin(freq * x[i] + phase) + offset   for each i in n_dim
         if pool_dict is None and seeds is None:
-            self.amp = torch.randn(self.b_size, 1, self.n_dims)
-            self.freq = torch.randn(self.b_size, 1, self.n_dims)
-            self.phase = torch.randn(self.b_size, 1, self.n_dims)
-            self.offset = torch.randn(self.b_size, 1, self.n_dims)
+            self.w = torch.randn(batch_size, n_dims, 1)
+            self.amp = torch.randn(batch_size, 1)
+            self.phase = torch.randn(batch_size, 1)
+            self.offset = torch.randn(batch_size, 1)
+            self.divisor = torch.abs(torch.randn(batch_size, 1)) + 0.1
         elif seeds is not None:
-            self.amp = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.freq = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.phase = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.offset = torch.zeros(self.b_size, 1, self.n_dims, 1)
+            self.w = torch.zeros(batch_size, n_dims, 1)
+            self.amp = torch.zeros(batch_size, 1)
+            self.phase = torch.zeros(batch_size, 1)
+            self.offset = torch.zeros(batch_size, 1)
+            self.divisor = torch.zeros(batch_size, 1)
             generator = torch.Generator()
-            assert len(seeds) == self.b_size
             for i, seed in enumerate(seeds):
                 generator.manual_seed(seed)
-                self.amp[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.freq[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.phase[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.offset[i] = torch.randn(1, self.n_dims, generator=generator)
+                self.w[i] = torch.randn(n_dims, 1, generator=generator)
+                self.amp[i] = torch.randn(1, generator=generator)
+                self.phase[i] = torch.randn(1, generator=generator)
+                self.offset[i] = torch.randn(1, generator=generator)
+                self.divisor[i] = torch.abs(torch.randn(1, generator=generator)) + 0.1
         else:
-            assert all(k in pool_dict for k in ["amp", "freq", "phase", "offset"])
-            indices = torch.randperm(len(pool_dict["amp"]))[:batch_size]
-            self.amp = pool_dict["amp"][indices]
-            self.freq = pool_dict["freq"][indices]
-            self.phase = pool_dict["phase"][indices]
-            self.offset = pool_dict["offset"][indices]
-    
-    def evaluate(self, xs_b):
-        # xs_b: shape (B, T, D)
-        amp = self.amp.to(xs_b.device)        # (B, 1, D)
-        freq = self.freq.to(xs_b.device)      
-        phase = self.phase.to(xs_b.device)
-        offset = self.offset.to(xs_b.device)
+            idx = torch.randperm(len(pool_dict["w"]))[:batch_size]
+            self.w = pool_dict["w"][idx]
+            self.amp = pool_dict["amp"][idx]
+            self.phase = pool_dict["phase"][idx]
+            self.offset = pool_dict["offset"][idx]
+            self.divisor = pool_dict["divisor"][idx]
 
-        # print(f"xs_b.shape = {xs_b.shape}")
-        # print(f"amp.shape = {amp.shape}")
-        # print(f"freq.shape = {freq.shape}")
-        # print(f"phase.shape = {phase.shape}")
-        # print(f"offset.shape = {offset.shape}")
-        
-        x = freq * xs_b + phase
-        saw = x/(2*torch.pi) - torch.floor(0.5 + x / (2*torch.pi))
-        triangle = 2 * torch.abs(2 * saw) - 1
-        fxs = amp * triangle + offset  # (B, T, D)
-        # Sum across D (dim=2) to get scalar output per x
-        ys = fxs.sum(dim=2).squeeze(-1)  # (B, T)
+    def evaluate(self, xs_b):  # xs_b: (B, T, D)
+        w = self.w.to(xs_b.device)             # (B, D, 1)
+        amp = self.amp.to(xs_b.device)         # (B, 1)
+        phase = self.phase.to(xs_b.device)     # (B, 1)
+        offset = self.offset.to(xs_b.device)   # (B, 1)
+        divisor = self.divisor.to(xs_b.device) # (B, 1)
+
+        dot = (xs_b @ w).squeeze(-1) + phase   # (B, T)
+        divisor_exp = divisor.expand_as(dot)  # (B, T)
+
+        triangle = (2 / divisor_exp) * torch.abs((dot - divisor_exp / 2) % divisor_exp - divisor_exp / 2)
+        ys = amp * triangle + offset           # (B, T)
+
         return ys * self.scale
-    
+
     @staticmethod
-    def generate_pool_dict(n_dims, num_tasks, **kwargs):  # ignore extra args
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):
         return {
-            "amp": torch.randn(num_tasks, 1, n_dims),
-            "freq": torch.randn(num_tasks, 1, n_dims),
-            "phase": torch.randn(num_tasks, 1, n_dims),
-            "offset": torch.randn(num_tasks, 1, n_dims),
+            "w": torch.randn(num_tasks, n_dims, 1),
+            "amp": torch.randn(num_tasks, 1),
+            "phase": torch.randn(num_tasks, 1),
+            "offset": torch.randn(num_tasks, 1),
+            "divisor": torch.abs(torch.randn(num_tasks, 1)) + 0.1,
         }
-    
+
     @staticmethod
     def get_metric():
         return squared_error
-    
+
     @staticmethod
     def get_training_metric():
         return mean_squared_error
 
 class SquareWaveRegression(Task):
     def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
-        """scale: a constant by which to scale the randomly sampled weights."""
-        super(SquareWaveRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        super().__init__(n_dims, batch_size, pool_dict, seeds)
         self.scale = scale
 
-        #f(x[i]) = amp * sin(freq * x[i] + phase) + offset   for each i in n_dim
         if pool_dict is None and seeds is None:
-            self.amp = torch.randn(self.b_size, 1, self.n_dims)
-            self.freq = torch.randn(self.b_size, 1, self.n_dims)
-            self.phase = torch.randn(self.b_size, 1, self.n_dims)
-            self.offset = torch.randn(self.b_size, 1, self.n_dims)
+            self.w = torch.randn(batch_size, n_dims, 1)
+            self.amp = torch.randn(batch_size, 1)
+            self.phase = torch.randn(batch_size, 1)
+            self.offset = torch.randn(batch_size, 1)
+            self.divisor = torch.abs(torch.randn(batch_size, 1)) + 0.1
         elif seeds is not None:
-            self.amp = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.freq = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.phase = torch.zeros(self.b_size, 1, self.n_dims, 1)
-            self.offset = torch.zeros(self.b_size, 1, self.n_dims, 1)
+            self.w = torch.zeros(batch_size, n_dims, 1)
+            self.amp = torch.zeros(batch_size, 1)
+            self.phase = torch.zeros(batch_size, 1)
+            self.offset = torch.zeros(batch_size, 1)
+            self.divisor = torch.zeros(batch_size, 1)
             generator = torch.Generator()
-            assert len(seeds) == self.b_size
             for i, seed in enumerate(seeds):
                 generator.manual_seed(seed)
-                self.amp[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.freq[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.phase[i] = torch.randn(1, self.n_dims, generator=generator)
-                self.offset[i] = torch.randn(1, self.n_dims, generator=generator)
+                self.w[i] = torch.randn(n_dims, 1, generator=generator)
+                self.amp[i] = torch.randn(1, generator=generator)
+                self.phase[i] = torch.randn(1, generator=generator)
+                self.offset[i] = torch.randn(1, generator=generator)
+                self.divisor[i] = torch.abs(torch.randn(1, generator=generator)) + 0.1
         else:
-            assert all(k in pool_dict for k in ["amp", "freq", "phase", "offset"])
-            indices = torch.randperm(len(pool_dict["amp"]))[:batch_size]
-            self.amp = pool_dict["amp"][indices]
-            self.freq = pool_dict["freq"][indices]
-            self.phase = pool_dict["phase"][indices]
-            self.offset = pool_dict["offset"][indices]
-    
-    def evaluate(self, xs_b):
-        # xs_b: shape (B, T, D)
-        amp = self.amp.to(xs_b.device)        # (B, 1, D)
-        freq = self.freq.to(xs_b.device)      
+            idx = torch.randperm(len(pool_dict["w"]))[:batch_size]
+            self.w = pool_dict["w"][idx]
+            self.amp = pool_dict["amp"][idx]
+            self.phase = pool_dict["phase"][idx]
+            self.offset = pool_dict["offset"][idx]
+            self.divisor = pool_dict["divisor"][idx]
+
+    def evaluate(self, xs_b):  # (B, T, D)
+        w = self.w.to(xs_b.device)
+        amp = self.amp.to(xs_b.device)
         phase = self.phase.to(xs_b.device)
         offset = self.offset.to(xs_b.device)
+        divisor = self.divisor.to(xs_b.device)
 
-        # print(f"xs_b.shape = {xs_b.shape}")
-        # print(f"amp.shape = {amp.shape}")
-        # print(f"freq.shape = {freq.shape}")
-        # print(f"phase.shape = {phase.shape}")
-        # print(f"offset.shape = {offset.shape}")
-        
-        x = freq * xs_b + phase
-        square = torch.sign(torch.sign(x))
-        
-        fxs = amp * square + offset  # (B, T, D)
-        # Sum across D (dim=2) to get scalar output per x
-        ys = fxs.sum(dim=2).squeeze(-1)  # (B, T)
+        dot = (xs_b @ w).squeeze(-1)
+        square = torch.sign(torch.sin((2 * math.pi * (dot + phase)) / divisor))
+        ys = amp * square + offset
         return ys * self.scale
-    
+
     @staticmethod
-    def generate_pool_dict(n_dims, num_tasks, **kwargs):  # ignore extra args
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):
         return {
-            "amp": torch.randn(num_tasks, 1, n_dims),
-            "freq": torch.randn(num_tasks, 1, n_dims),
-            "phase": torch.randn(num_tasks, 1, n_dims),
-            "offset": torch.randn(num_tasks, 1, n_dims),
+            "w": torch.randn(num_tasks, n_dims, 1),
+            "amp": torch.randn(num_tasks, 1),
+            "phase": torch.randn(num_tasks, 1),
+            "offset": torch.randn(num_tasks, 1),
+            "divisor": torch.abs(torch.randn(num_tasks, 1)) + 0.1,
         }
-    
+
     @staticmethod
     def get_metric():
         return squared_error
-    
+
     @staticmethod
     def get_training_metric():
         return mean_squared_error

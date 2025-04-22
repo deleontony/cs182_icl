@@ -9,6 +9,7 @@ training:
             end: 41
             inc: 2
             interval: 2000 
+    resume_id: b3d2bde5-95b7-4227-96b3-1cad688fec80
 
 out_dir: ../models/periodic/radial_sine_regression
 
