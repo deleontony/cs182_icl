@@ -1,0 +1,17 @@
+inherit: 
+    - base.yaml
+
+training:
+    task: saw_regression
+    curriculum:
+        points:
+            start: 11 #TODO: 11, or 26, need to figure out what this does
+            end: 41 #TODO: 41 or 101, need to figure out what this does
+            inc: 2 #TODO: 2 or 5, need to figure out what this does
+            interval: 2000 # always the same
+    resume_id: 8b1e67d2-cd30-4c7d-95fd-ce32a2e5e22e
+
+out_dir: ../models/periodic/saw_regression
+
+wandb:
+    name: "saw_regression_standard"
