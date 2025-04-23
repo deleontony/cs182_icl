@@ -37,10 +37,39 @@ relevant_model_names = {
         "3-Nearest Neighbors",
         "2-layer NN, GD",
     ],
-    "sine_regression": [
+    ### NEW MODELS BELOW ###
+    "fourier_sine_regression": [
         "Transformer",
-        "MLP",
+        "3-Nearest Neighbors",
+    ],
+    "radial_sine_regression": [
+        "Transformer",
         "Fourier",
+        "MLP",
+    ],
+    "linear_sine_regression": [
+        "Transformer",
+        "Fourier",
+        "MLP",
+    ],
+    "linear_modulo_regression": [
+        "Transformer",
+        "3-Nearest Neighbors",
+    ],
+    "saw_regression": [
+        "Transformer",
+        "Fourier",
+        "MLP",
+    ],
+    "square_wave_regression": [
+        "Transformer",
+        "Fourier",
+        "MLP",
+    ],
+    "triangle_wave_regression": [
+        "Transformer",
+        "Fourier",
+        "MLP",
     ],
 }
 
@@ -72,7 +101,7 @@ def basic_plot(metrics, models=None, trivial=1.0):
     return fig, ax
 
 
-def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=None):
+def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=None, step=-1):
     all_metrics = {}
     for _, r in df.iterrows():
         if valid_row is not None and not valid_row(r):
@@ -82,7 +111,8 @@ def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=
         _, conf = get_model_from_run(run_path, only_conf=True)
 
         print(r.run_name, r.run_id)
-        metrics = get_run_metrics(run_path, skip_model_load=True)
+        metrics = get_run_metrics(run_path, step=step, skip_model_load=True)
+        print(metrics)
 
         for eval_name, results in sorted(metrics.items()):
             processed_results = {}

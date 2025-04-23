@@ -72,6 +72,38 @@ def get_relevant_baselines(task_name):
             (XGBoostModel, {}),
             (AveragingModel, {}),
         ],
+        ### NEW MODELS BELOW ###
+        # TODO: Set all properly
+        "fourier_sine_regression": [
+            (NNModel, {"n_neighbors": 3}),
+        ],
+        "radial_sine_regression": [
+            (FourierRegressionModel, {"num_terms": 20}),
+            (MLPModel, {})
+        ],
+        "linear_sine_regression": [
+            (FourierRegressionModel, {"num_terms": 20}),
+            (MLPModel, {}),
+        ],
+        # "linear_modulo_regression": [
+        #     (SeparableFourierRegressor, {"num_terms": 20}),
+        #     (MLPModel, {})
+        # ],
+        "linear_modulo_regression": [
+            (NNModel, {"n_neighbors": 3}),
+        ],
+        "saw_regression": [
+            (FourierRegressionModel, {"num_terms": 20}),
+            (MLPModel, {})
+        ],
+        "square_wave_regression": [
+            (FourierRegressionModel, {"num_terms": 20}),
+            (MLPModel, {})
+        ],
+        "triangle_wave_regression": [
+            (FourierRegressionModel, {"num_terms": 20}),
+            (MLPModel, {})
+        ],
     }
 
     models = [model_cls(**kwargs) for model_cls, kwargs in task_to_baselines[task_name]]
@@ -571,30 +603,88 @@ class FourierRegressionModel:
             pred = torch.zeros_like(ys[:, 0])
             if i > 0:
                 for j in range(ys.shape[0]):
-                    train_xs = xs[j, :i]
-                    train_ys = ys[j, :i]
+                    train_xs = xs[j, :i]            # shape (i,)
+                    train_ys = ys[j, :i]            # shape (i,)
 
-                    # Use time indices as inputs for Fourier features
-                    #t = torch.arange(i).float() / i  # normalized time [0, 1)
+                    # # Use xs or time indices as Fourier input
+                    # X = self._design_matrix(train_xs)   # (i, 2K+1)
+                    # y = train_ys.view(-1, 1)            # (i, 1)
 
-                    #X = self._design_matrix(t)
+                    X = self._design_matrix(train_xs)   # (i, 2K+1)
+                    y = train_ys.view(-1, 1)            # (i, 1)
 
-                    X = self._design_matrix(train_xs) #it depends if we want to use time indices as inputs for Fourier features. If we want xs, use xs
-                    y = train_ys.view(-1, 1)
+                    if X.shape[0] != y.shape[0]:
+                        print(f"Shape mismatch: X.shape = {X.shape}, y.shape = {y.shape}")
+                        continue  # skip this step for now instead of crashing
+
+                    beta = torch.linalg.lstsq(X, y).solution
 
                     # Fit via least squares: beta = (X^T X)^(-1) X^T y
-                    try:
-                        beta, _ = torch.lstsq(y, X)  # legacy PyTorch < 1.9
-                        beta = beta[:X.shape[1]]
-                    except:
-                        # For modern PyTorch versions
-                        beta = torch.linalg.lstsq(X, y).solution
+                    beta = torch.linalg.lstsq(X, y).solution  # shape (2K+1, 1)
 
-                    # Predict at the next time step
-                    t_test = torch.tensor([(i) / (i + 1)]).float()
-                    X_test = self._design_matrix(t_test)
-                    y_pred = X_test @ beta
-                    pred[j] = y_pred[0, 0]
+                    # Predict at the next step (use next x or time)
+                    next_x = xs[j, i].view(1)          # scalar input for prediction
+                    X_test = self._design_matrix(next_x)      # (1, 2K+1)
+                    y_pred = X_test @ beta             # (1, 1)
+                    pred[j] = y_pred.item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)
+
+class SeparableFourierRegressor:
+    def __init__(self, num_terms=3):
+        self.name = f"separable_fourier_{num_terms}"  # Custom name for tracking
+        self.num_terms = num_terms  # Number of sine terms per dimension
+
+    def _design_matrix(self, x):
+        """
+        x: (N,) tensor for a single dimension
+        returns: (N, 3 * num_terms + 1) tensor with [bias, sin(kx), cos(kx), kx]
+        """
+        x = x.view(-1, 1)  # Ensure column vector
+        features = [torch.ones_like(x)]  # Bias term
+        for k in range(1, self.num_terms + 1):
+            features.append(torch.sin(k * x))
+            features.append(torch.cos(k * x))
+        return torch.cat(features, dim=1)  # shape: (N, 2*num_terms + 1)
+
+    def __call__(self, xs, ys, inds=None):
+        # xs, ys = xs.cpu(), ys.cpu()
+        xs, ys = xs.cuda(), ys.cuda()
+
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+
+        for i in tqdm(inds):
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    train_xs = xs[j, :i]       # shape (i, d)
+                    train_ys = ys[j, :i]       # shape (i,)
+                    
+                    # Build a separable design matrix
+                    X_parts = [self._design_matrix(train_xs[:, d]) for d in range(train_xs.shape[1])]
+                    X_full = torch.cat(X_parts, dim=1)  # shape: (i, d * (2*num_terms+1))
+                    y = train_ys.view(-1, 1)            # shape (i, 1)
+
+                    try:
+                        beta = torch.linalg.lstsq(X_full, y).solution
+                    except RuntimeError:
+                        continue  # skip if not solvable
+
+                    # Build test feature for next point
+                    next_x = xs[j, i]  # shape (d,)
+                    test_parts = [self._design_matrix(next_x[d].view(1)) for d in range(next_x.shape[0])]
+                    X_test = torch.cat(test_parts, dim=1)  # shape: (1, d * (2*num_terms+1))
+
+                    y_pred = X_test @ beta               # shape (1, 1)
+                    pred[j] = y_pred.item()
 
             preds.append(pred)
 
