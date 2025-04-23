@@ -78,31 +78,22 @@ def get_relevant_baselines(task_name):
             (NNModel, {"n_neighbors": 3}),
         ],
         "radial_sine_regression": [
-            (FourierRegressionModel, {"num_terms": 20}),
-            (MLPModel, {})
+            (NNModel, {"n_neighbors": 3}),
         ],
         "linear_sine_regression": [
-            (FourierRegressionModel, {"num_terms": 20}),
-            (MLPModel, {}),
+            (NNModel, {"n_neighbors": 3}),
         ],
-        # "linear_modulo_regression": [
-        #     (SeparableFourierRegressor, {"num_terms": 20}),
-        #     (MLPModel, {})
-        # ],
         "linear_modulo_regression": [
             (NNModel, {"n_neighbors": 3}),
         ],
         "saw_regression": [
-            (FourierRegressionModel, {"num_terms": 20}),
-            (MLPModel, {})
+            (NNModel, {"n_neighbors": 3}),
         ],
         "square_wave_regression": [
-            (FourierRegressionModel, {"num_terms": 20}),
-            (MLPModel, {})
+            (NNModel, {"n_neighbors": 3}),
         ],
         "triangle_wave_regression": [
-            (FourierRegressionModel, {"num_terms": 20}),
-            (MLPModel, {})
+            (NNModel, {"n_neighbors": 3}),
         ],
     }
 
@@ -685,6 +676,60 @@ class SeparableFourierRegressor:
 
                     y_pred = X_test @ beta               # shape (1, 1)
                     pred[j] = y_pred.item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)
+
+from symfit import variables, parameters, Fit, sin
+import numpy as np
+
+class SymFitModel:
+    def __init__(self):
+        self.name = "symfit_nd"
+
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cpu(), ys.cpu()
+        if inds is None:
+            inds = range(ys.shape[1])
+
+        preds = []
+
+        for i in inds:
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    X = xs[j, :i].numpy()  # shape (i, d)
+                    Y = ys[j, :i].numpy()
+
+                    d = X.shape[1]
+                    # Create symbolic inputs: x0, x1, ..., xd-1
+                    x_vars = variables(','.join([f'x{k}' for k in range(d)]))
+                    amps = parameters(','.join([f'amp{k}' for k in range(d)]))
+                    freqs = parameters(','.join([f'freq{k}' for k in range(d)]))
+                    phases = parameters(','.join([f'phase{k}' for k in range(d)]))
+                    offset = parameters('offset')[0]
+
+                    # Build model: sum of amp_k * sin(freq_k * x_k + phase_k)
+                    model = sum(
+                        amps[k] * sin(freqs[k] * x_vars[k] + phases[k])
+                        for k in range(d)
+                    ) + offset
+
+                    data_dict = {x_vars[k]: X[:, k] for k in range(d)}
+                    data_dict['y'] = Y
+
+                    try:
+                        fit = Fit(model, **data_dict)
+                        result = fit.execute()
+
+                        x_input = xs[j, i].numpy()
+                        x_eval = {x_vars[k]: x_input[k] for k in range(d)}
+                        y_pred = model(**x_eval, **result.params).value
+
+                        pred[j] = torch.tensor(y_pred)
+                    except Exception:
+                        pred[j] = torch.tensor(0.0)
 
             preds.append(pred)
 

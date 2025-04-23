@@ -44,13 +44,11 @@ relevant_model_names = {
     ],
     "radial_sine_regression": [
         "Transformer",
-        "Fourier",
-        "MLP",
+        "3-Nearest Neighbors",
     ],
     "linear_sine_regression": [
         "Transformer",
-        "Fourier",
-        "MLP",
+        "3-Nearest Neighbors",
     ],
     "linear_modulo_regression": [
         "Transformer",
@@ -58,18 +56,15 @@ relevant_model_names = {
     ],
     "saw_regression": [
         "Transformer",
-        "Fourier",
-        "MLP",
+        "3-Nearest Neighbors",
     ],
     "square_wave_regression": [
         "Transformer",
-        "Fourier",
-        "MLP",
+        "3-Nearest Neighbors",
     ],
     "triangle_wave_regression": [
         "Transformer",
-        "Fourier",
-        "MLP",
+        "3-Nearest Neighbors",
     ],
 }
 
