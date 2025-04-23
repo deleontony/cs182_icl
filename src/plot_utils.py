@@ -112,7 +112,6 @@ def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=
 
         print(r.run_name, r.run_id)
         metrics = get_run_metrics(run_path, step=step, skip_model_load=True)
-        print(metrics)
 
         for eval_name, results in sorted(metrics.items()):
             processed_results = {}
