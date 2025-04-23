@@ -1,5 +1,0 @@
-wandb:
-    project: cs182_icl
-    entity: tonydeleon
-    notes: 
-    log_every_steps: 100
