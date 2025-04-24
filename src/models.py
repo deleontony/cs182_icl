@@ -74,8 +74,9 @@ def get_relevant_baselines(task_name):
         ],
         ### NEW MODELS BELOW ###
         # TODO: Set all properly
-        "fourier_sine_regression": [
+        "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
+            (ScipySumSineModel, {"d": 20}),
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -561,176 +562,90 @@ class MLPModel:
 
         return torch.stack(preds, dim=1)
 
-class FourierRegressionModel:
-    def __init__(self, num_terms=3):
-        self.name = "fourier"
-        self.num_terms = num_terms  # Number of sine/cosine pairs
+from scipy.optimize import curve_fit
+class ScipySumSineModel:
+    def __init__(self, d):
+        self.name = "scipy_sine_sum"
+        self.amps = None
+        self.freqs = None
+        self.phases = None
+        self.offsets = None
 
-    def _design_matrix(self, t):
+    def _single_sine(self, x, amp, freq, phase, offset):
+        return amp * np.sin(freq * x + phase) + offset
+
+    def fit(self, x_train, y_train):
+        x_train = x_train.detach().cpu().numpy()
+        y_train = y_train.detach().cpu().numpy()
+
+        n_points, n_dims = x_train.shape
+        self.amps = np.zeros(n_dims)
+        self.freqs = np.zeros(n_dims)
+        self.phases = np.zeros(n_dims)
+        self.offsets = np.zeros(n_dims)
+
+        preds = np.zeros((n_points, n_dims))
+        for direction in ["forward", "backward"]:
+            if direction == "forward":
+                residual = y_train.copy()
+                dim_order = range(n_dims)
+            else:
+                dim_order = range(n_dims - 2, -1, -1) # skip last sine
+
+            
+            for dim in dim_order:
+                residual += preds[:, dim] # zero on forward pass, prev pred on backward pass -> undo contribution
+                x = x_train[:, dim]
+                try:
+                    params, _ = curve_fit(self._single_sine, x, residual, p0=[1.0, 1.0, 0.0, 0.0])
+                    amp, freq, phase, offset = params
+                except Exception:
+                    amp, freq, phase, offset = 0.0, 0.0, 0.0, 0.0
+
+                # Update stored params
+                self.amps[dim] = amp
+                self.freqs[dim] = freq
+                self.phases[dim] = phase
+                self.offsets[dim] = offset
+
+                # Subtract this dimension's contribution
+                pred = self._single_sine(x, amp, freq, phase, offset)
+                residual -= pred
+                preds[:, dim] = pred
+
+    def predict(self, x):
         """
-        Build Fourier design matrix for input t.
-        t: (N,) tensor
-        returns: (N, 2K+1) tensor
+        x: shape (n_points, n_dims)
+        Returns y_pred: shape (n_points,)
         """
-        t = t.view(-1, 1)
-        X = [torch.ones_like(t)]  # bias term
-        for k in range(1, self.num_terms + 1):
-            X.append(torch.cos(2 * np.pi * k * t))
-            X.append(torch.sin(2 * np.pi * k * t))
-        return torch.cat(X, dim=1)
+        x = x.detach().cpu().numpy()
+        n_points, n_dims = x.shape
+        y_pred = np.zeros(n_points)
+        for dim in range(n_dims):
+            x_dim = x[:, dim]
+            y_pred += self.amps[dim] * np.sin(self.freqs[dim] * x_dim + self.phases[dim]) + self.offsets[dim]
+        return y_pred
 
     def __call__(self, xs, ys, inds=None):
-        xs, ys = xs.cpu(), ys.cpu()
+        if xs.ndim == 3:
+            preds = []
+            for i in range(xs.shape[0]):
+                preds.append(self.__call__(xs[i], ys[i], inds))  # recursively call on each sample
+            return torch.stack(preds, dim=0)
 
         if inds is None:
-            inds = range(ys.shape[1])
-        else:
-            if max(inds) >= ys.shape[1] or min(inds) < 0:
-                raise ValueError("inds contain indices where xs and ys are not defined")
+            inds = range(ys.shape[0])
 
-        preds = []
-
-        for i in tqdm(inds):
-            pred = torch.zeros_like(ys[:, 0])
-            if i > 0:
-                for j in range(ys.shape[0]):
-                    train_xs = xs[j, :i]            # shape (i,)
-                    train_ys = ys[j, :i]            # shape (i,)
-
-                    # # Use xs or time indices as Fourier input
-                    # X = self._design_matrix(train_xs)   # (i, 2K+1)
-                    # y = train_ys.view(-1, 1)            # (i, 1)
-
-                    X = self._design_matrix(train_xs)   # (i, 2K+1)
-                    y = train_ys.view(-1, 1)            # (i, 1)
-
-                    if X.shape[0] != y.shape[0]:
-                        print(f"Shape mismatch: X.shape = {X.shape}, y.shape = {y.shape}")
-                        continue  # skip this step for now instead of crashing
-
-                    beta = torch.linalg.lstsq(X, y).solution
-
-                    # Fit via least squares: beta = (X^T X)^(-1) X^T y
-                    beta = torch.linalg.lstsq(X, y).solution  # shape (2K+1, 1)
-
-                    # Predict at the next step (use next x or time)
-                    next_x = xs[j, i].view(1)          # scalar input for prediction
-                    X_test = self._design_matrix(next_x)      # (1, 2K+1)
-                    y_pred = X_test @ beta             # (1, 1)
-                    pred[j] = y_pred.item()
-
-            preds.append(pred)
-
-        return torch.stack(preds, dim=1)
-
-class SeparableFourierRegressor:
-    def __init__(self, num_terms=3):
-        self.name = f"separable_fourier_{num_terms}"  # Custom name for tracking
-        self.num_terms = num_terms  # Number of sine terms per dimension
-
-    def _design_matrix(self, x):
-        """
-        x: (N,) tensor for a single dimension
-        returns: (N, 3 * num_terms + 1) tensor with [bias, sin(kx), cos(kx), kx]
-        """
-        x = x.view(-1, 1)  # Ensure column vector
-        features = [torch.ones_like(x)]  # Bias term
-        for k in range(1, self.num_terms + 1):
-            features.append(torch.sin(k * x))
-            features.append(torch.cos(k * x))
-        return torch.cat(features, dim=1)  # shape: (N, 2*num_terms + 1)
-
-    def __call__(self, xs, ys, inds=None):
-        # xs, ys = xs.cpu(), ys.cpu()
-        xs, ys = xs.cuda(), ys.cuda()
-
-        if inds is None:
-            inds = range(ys.shape[1])
-        else:
-            if max(inds) >= ys.shape[1] or min(inds) < 0:
-                raise ValueError("inds contain indices where xs and ys are not defined")
-
-        preds = []
-
-        for i in tqdm(inds):
-            pred = torch.zeros_like(ys[:, 0])
-            if i > 0:
-                for j in range(ys.shape[0]):
-                    train_xs = xs[j, :i]       # shape (i, d)
-                    train_ys = ys[j, :i]       # shape (i,)
-                    
-                    # Build a separable design matrix
-                    X_parts = [self._design_matrix(train_xs[:, d]) for d in range(train_xs.shape[1])]
-                    X_full = torch.cat(X_parts, dim=1)  # shape: (i, d * (2*num_terms+1))
-                    y = train_ys.view(-1, 1)            # shape (i, 1)
-
-                    try:
-                        beta = torch.linalg.lstsq(X_full, y).solution
-                    except RuntimeError:
-                        continue  # skip if not solvable
-
-                    # Build test feature for next point
-                    next_x = xs[j, i]  # shape (d,)
-                    test_parts = [self._design_matrix(next_x[d].view(1)) for d in range(next_x.shape[0])]
-                    X_test = torch.cat(test_parts, dim=1)  # shape: (1, d * (2*num_terms+1))
-
-                    y_pred = X_test @ beta               # shape (1, 1)
-                    pred[j] = y_pred.item()
-
-            preds.append(pred)
-
-        return torch.stack(preds, dim=1)
-
-from symfit import variables, parameters, Fit, sin
-import numpy as np
-
-class SymFitModel:
-    def __init__(self):
-        self.name = "symfit_nd"
-
-    def __call__(self, xs, ys, inds=None):
-        xs, ys = xs.cpu(), ys.cpu()
-        if inds is None:
-            inds = range(ys.shape[1])
-
-        preds = []
-
+        preds = np.zeros(ys.shape[0])
         for i in inds:
-            pred = torch.zeros_like(ys[:, 0])
-            if i > 0:
-                for j in range(ys.shape[0]):
-                    X = xs[j, :i].numpy()  # shape (i, d)
-                    Y = ys[j, :i].numpy()
+            if i == 0:
+                preds[i] = np.zeros_like(ys[0])
+                continue
 
-                    d = X.shape[1]
-                    # Create symbolic inputs: x0, x1, ..., xd-1
-                    x_vars = variables(','.join([f'x{k}' for k in range(d)]))
-                    amps = parameters(','.join([f'amp{k}' for k in range(d)]))
-                    freqs = parameters(','.join([f'freq{k}' for k in range(d)]))
-                    phases = parameters(','.join([f'phase{k}' for k in range(d)]))
-                    offset = parameters('offset')[0]
+            x_train, y_train = xs[:i], ys[:i]
+            x_test = xs[i].reshape(1, -1)
 
-                    # Build model: sum of amp_k * sin(freq_k * x_k + phase_k)
-                    model = sum(
-                        amps[k] * sin(freqs[k] * x_vars[k] + phases[k])
-                        for k in range(d)
-                    ) + offset
+            self.fit(x_train, y_train)
+            preds[i] = self.predict(x_test)
 
-                    data_dict = {x_vars[k]: X[:, k] for k in range(d)}
-                    data_dict['y'] = Y
-
-                    try:
-                        fit = Fit(model, **data_dict)
-                        result = fit.execute()
-
-                        x_input = xs[j, i].numpy()
-                        x_eval = {x_vars[k]: x_input[k] for k in range(d)}
-                        y_pred = model(**x_eval, **result.params).value
-
-                        pred[j] = torch.tensor(y_pred)
-                    except Exception:
-                        pred[j] = torch.tensor(0.0)
-
-            preds.append(pred)
-
-        return torch.stack(preds, dim=1)
+        return torch.tensor(preds).unsqueeze(0)

@@ -38,7 +38,7 @@ relevant_model_names = {
         "2-layer NN, GD",
     ],
     ### NEW MODELS BELOW ###
-    "fourier_sine_regression": [
+    "sum_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
     ],

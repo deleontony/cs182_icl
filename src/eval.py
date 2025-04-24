@@ -209,7 +209,18 @@ def build_evals(conf):
     evaluation_kwargs = {}
 
     evaluation_kwargs["standard"] = {"prompting_strategy": "standard"}
-    if task_name != "linear_regression":
+    
+    periodic_tasks = [
+        "fourier_sine_regression", 
+        "radial_sine_regression", 
+        "linear_sine_regression", 
+        "linear_modulo_regression", 
+        "saw_regression", 
+        "square_wave_regression", 
+        "triangle_wave_regression"
+    ]
+
+    if task_name != "linear_regression" and task_name not in periodic_tasks:
         if task_name in ["relu_2nn_regression"]:
             evaluation_kwargs["linear_regression"] = {"task_name": "linear_regression"}
         for name, kwargs in evaluation_kwargs.items():
@@ -249,10 +260,11 @@ def build_evals(conf):
 
             evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
-    evaluation_kwargs[f"noisyLR"] = {
-        "task_sampler_kwargs": {"renormalize_ys": True, "noise_std": 1},
-        "task_name": "noisy_linear_regression",
-    }
+    if task_name == "linear_regression":
+        evaluation_kwargs[f"noisyLR"] = {
+            "task_sampler_kwargs": {"renormalize_ys": True, "noise_std": 1},
+            "task_name": "noisy_linear_regression",
+        }
 
     for name, kwargs in evaluation_kwargs.items():
         # allow kwargs to override base_kwargs values
@@ -276,7 +288,8 @@ def compute_evals(all_models, evaluation_kwargs, save_path=None, recompute=False
         for model in all_models:
             if model.name in metrics and not recompute:
                 continue
-
+            
+            print(f"Computing Evaluation {eval_name} on Model {model.name}")
             metrics[model.name] = eval_model(model, **kwargs)
         all_metrics[eval_name] = metrics
 
@@ -350,8 +363,9 @@ def baseline_names(name):
         return "XGBoost"
     if "mlp" in name.lower():
         return "MLP"
-    if "fourier" in name.lower():
-        return "Fourier"
+    if "scipy_sine" in name.lower():
+        d = name.split("_")[2].split("=")[1]
+        return f"SciPy Curve Fit: Sum of {d} Sines"
     return name
 
 

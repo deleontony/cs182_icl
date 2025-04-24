@@ -60,7 +60,7 @@ def get_task_sampler(
         "quadratic_regression": QuadraticRegression,
         "relu_2nn_regression": Relu2nnRegression,
         "decision_tree": DecisionTree,
-        "fourier_sine_regression": FourierSineRegression,
+        "sum_sine_regression": SumSineRegression,
         "radial_sine_regression": RadialSineRegression,
         "linear_sine_regression": LinearSineRegression,
         "linear_modulo_regression": LinearModuloRegression,
@@ -80,10 +80,10 @@ def get_task_sampler(
         raise NotImplementedError
 
 
-class FourierSineRegression(Task):
+class SumSineRegression(Task):
     def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1): 
         """scale: a constant by which to scale the randomly sampled weights."""
-        super(FourierSineRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        super(SumSineRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
         self.scale = scale
 
         #f(x[i]) = amp * sin(freq * x[i] + phase) + offset   for each i in n_dim
