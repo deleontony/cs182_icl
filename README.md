@@ -3,9 +3,6 @@ This repository contains the code and models for our CS182 Project:
 **In-Context Learning of Periodic Function Classes** <br>
 *Anonymous Authors* <br><br>
 
-![](setting.jpg)
-
-
 ## Getting started
 You can start by cloning the repository and following the steps below.
 
