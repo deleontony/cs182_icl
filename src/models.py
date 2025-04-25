@@ -76,7 +76,7 @@ def get_relevant_baselines(task_name):
         # TODO: Set all properly
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
-            # (ScipySumSineModel, {}), # Fix this, so slow
+            # (TorchSumSineModel, {}), # Fix this, so slow
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -565,6 +565,121 @@ class MLPModel:
 from scipy.optimize import curve_fit
 # from multiprocessing import Pool
 from joblib import Parallel, delayed
+
+import torch.optim as optim
+class TorchSumSineModel:
+    def __init__(self, device='cuda' if torch.cuda.is_available() else 'cpu'):
+        self.device = device
+        self.name = "torch_sine_sum"
+
+    def _single_sine(self,x,amp,freq,phase,offset):
+        return amp * np.sin((freq * x + phase) % (2 * np.pi)) + offset
+    
+    def fit_single_dimension(self, x, y, epochs=100):
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        amp = nn.Parameter(torch.tensor(1.0, device=self.device))
+        freq = nn.Parameter(torch.tensor(1.0, device=self.device))
+        phase = nn.Parameter(torch.tensor(0.0, device=self.device))
+        offset = nn.Parameter(torch.tensor(0.0, device=self.device))
+
+        optimizer = optim.Adam([amp, freq, phase, offset], lr=lr)
+        loss_fn = nn.MSELoss()
+
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            y_pred = self._single_sine(x,amp,freq,phase,offset)
+            loss = loss_fn(y_pred,y)
+            loss.backward()
+            optimizer.step()
+        
+        return amp.item(), freq.item(), phase.item(),offset.item()
+
+    
+    def fit(self,x_train,y_train):
+        x_train = x_train.to(self.device)
+        y_train = y_train.to(self.device)
+        
+        n_points, n_dims = x_train.shape
+        amps = torch.zeros(n_dims, device=self.device)
+        freqs = torch.zeros(n_dims, device=self.device)
+        phases = torch.zeros(n_dims, device=self.device)
+        offsets = torch.zeros(n_dims, device=self.device)
+
+        preds = torch.zeros_like(y_train)
+        for direction in ["forward","backward"]:
+            if direction == "forward":
+                residual = y_train.clone()
+                dim_order = range(n_dims)
+            else:
+                dim_order = range(n_dims-2,-1,-1)
+            
+            for dim in dim_order:
+                residual += preds[:,dim]
+                x = x_train[:,dim]
+            
+                try:
+                    amp,freq,phase,offset = self.fit_single_dimension(x,residual)
+                except Exception:
+                    amp,freq,phase,offset = 0.0,0.0,0.0,0.0
+            
+                amps[dim] = amp
+                freqs[dim] = freq
+                phases[dim] = phase
+                offsets[dim] = offset
+
+                pred = self._single_sine(x,amps[dim],freqs[dim],phases[dim], offsets[dim])
+                residual -= pred
+                preds[:,dim] = pred
+        return amps, freqs, phases, offsets
+    
+    def predict(self, x, params):
+        x = x.to(self.device)
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+        
+        amps, freqs, phases, offsets = params
+        y_pred = torch.sum(amps * torch.sin(x * freqs + phases) + offsets, dim = 1)
+        return y_pred
+
+    def _call_single(self, xs, ys, inds, b):
+        print(f"_call_single {b} called")
+        n_points = xs.shape[0]
+        if inds is None:
+            inds = range(n_points)
+
+        preds = torch.zeros(n_points)
+        for i in inds:
+            if i == 0:
+                preds[i] = 0.0
+                continue
+            x_train, y_train = xs[:i], ys[:i]
+            x_test = xs[i]
+            print(f"_call_single {b} fit call {i}")
+            params = self.fit(x_train, y_train)
+            print(f"_call_single {b} predict call {i}")
+            preds[i] = self.predict(x_test, params).item()
+
+        print(f"_call_single {b} returns")
+        return i, preds.unsqueeze(0)
+
+    def __call__(self, xs, ys, inds=None):
+        xs = xs.to(self.device)
+        ys = ys.to(self.device)
+        print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
+
+        if xs.ndim == 3:
+            results = []
+            for i in range(xs.shape[0]):
+                _,pred = self._call_single(xs[i], ys[i], inds, i)
+                results.append(pred)
+            return torch.cat(results,dim=0)
+        elif xs.ndim == 2:
+            _, pred = self._call_single(xs, ys, inds,0)
+            return pred
+        else:
+            raise ValueError("Input xs must be 2D or 3D tensor.")
 
 
 class ScipySumSineModel:
