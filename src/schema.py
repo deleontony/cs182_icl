@@ -40,7 +40,7 @@ TASK_LIST = [
     "linear_classification",
     "relu_2nn_regression",
     "decision_tree",
-    "fourier_sine_regression",
+    "sum_sine_regression",
     "radial_sine_regression",
     "linear_sine_regression",
     "linear_modulo_regression",

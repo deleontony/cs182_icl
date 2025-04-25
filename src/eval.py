@@ -179,6 +179,7 @@ def eval_model(
 
     generating_func = globals()[f"gen_{prompting_strategy}"]
     for i in range(num_eval_examples // batch_size):
+        print(f"Evaluating batch {i + 1} of {num_eval_examples // batch_size}")
         xs, xs_p = generating_func(data_sampler, n_points, batch_size)
 
         metrics = eval_batch(model, task_sampler, xs, xs_p)
@@ -211,7 +212,7 @@ def build_evals(conf):
     evaluation_kwargs["standard"] = {"prompting_strategy": "standard"}
     
     periodic_tasks = [
-        "fourier_sine_regression", 
+        "sum_sine_regression", 
         "radial_sine_regression", 
         "linear_sine_regression", 
         "linear_modulo_regression", 
@@ -364,8 +365,7 @@ def baseline_names(name):
     if "mlp" in name.lower():
         return "MLP"
     if "scipy_sine" in name.lower():
-        d = name.split("_")[2].split("=")[1]
-        return f"SciPy Curve Fit: Sum of {d} Sines"
+        return f"SciPy Curve Fit: Sum of Sines"
     return name
 
 

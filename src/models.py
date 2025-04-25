@@ -76,7 +76,7 @@ def get_relevant_baselines(task_name):
         # TODO: Set all properly
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
-            (ScipySumSineModel, {"d": 20}),
+            # (ScipySumSineModel, {}), # Fix this, so slow
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -563,26 +563,26 @@ class MLPModel:
         return torch.stack(preds, dim=1)
 
 from scipy.optimize import curve_fit
+# from multiprocessing import Pool
+from joblib import Parallel, delayed
+
+
 class ScipySumSineModel:
-    def __init__(self, d):
-        self.name = "scipy_sine_sum"
-        self.amps = None
-        self.freqs = None
-        self.phases = None
-        self.offsets = None
+    def __init__(self):
+        self.name = f"scipy_sine_sum"
 
     def _single_sine(self, x, amp, freq, phase, offset):
-        return amp * np.sin(freq * x + phase) + offset
+        return amp * np.sin((freq * x + phase) % (2 * np.pi)) + offset
 
     def fit(self, x_train, y_train):
         x_train = x_train.detach().cpu().numpy()
         y_train = y_train.detach().cpu().numpy()
 
         n_points, n_dims = x_train.shape
-        self.amps = np.zeros(n_dims)
-        self.freqs = np.zeros(n_dims)
-        self.phases = np.zeros(n_dims)
-        self.offsets = np.zeros(n_dims)
+        amps = np.zeros(n_dims)
+        freqs = np.zeros(n_dims)
+        phases = np.zeros(n_dims)
+        offsets = np.zeros(n_dims)
 
         preds = np.zeros((n_points, n_dims))
         for direction in ["forward", "backward"]:
@@ -591,61 +591,81 @@ class ScipySumSineModel:
                 dim_order = range(n_dims)
             else:
                 dim_order = range(n_dims - 2, -1, -1) # skip last sine
-
             
             for dim in dim_order:
                 residual += preds[:, dim] # zero on forward pass, prev pred on backward pass -> undo contribution
                 x = x_train[:, dim]
                 try:
-                    params, _ = curve_fit(self._single_sine, x, residual, p0=[1.0, 1.0, 0.0, 0.0])
+                    params, _ = curve_fit(
+                        self._single_sine,
+                        x,
+                        residual,
+                        p0=[1.0, 1.0, 0.0, 0.0],
+                        bounds=([0, 0, -2 * np.pi, -np.inf], [np.inf, 20, 2 * np.pi, np.inf]),
+                        maxfev=1000,
+                    )
                     amp, freq, phase, offset = params
                 except Exception:
                     amp, freq, phase, offset = 0.0, 0.0, 0.0, 0.0
 
                 # Update stored params
-                self.amps[dim] = amp
-                self.freqs[dim] = freq
-                self.phases[dim] = phase
-                self.offsets[dim] = offset
+                amps[dim] = amp
+                freqs[dim] = freq
+                phases[dim] = phase
+                offsets[dim] = offset
 
                 # Subtract this dimension's contribution
                 pred = self._single_sine(x, amp, freq, phase, offset)
                 residual -= pred
                 preds[:, dim] = pred
+        
+        return amps, freqs, phases, offsets
 
-    def predict(self, x):
-        """
-        x: shape (n_points, n_dims)
-        Returns y_pred: shape (n_points,)
-        """
-        x = x.detach().cpu().numpy()
-        n_points, n_dims = x.shape
-        y_pred = np.zeros(n_points)
-        for dim in range(n_dims):
-            x_dim = x[:, dim]
-            y_pred += self.amps[dim] * np.sin(self.freqs[dim] * x_dim + self.phases[dim]) + self.offsets[dim]
-        return y_pred
+    def predict(self, x, params):
+        x = x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else x
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+        
+        amps, freqs, phases, offsets = params
+        y_pred = np.sum(amps * np.sin(x * freqs + phases) + offsets, axis = 1)
+        return torch.tensor(y_pred, dtype=torch.float32)
 
-    def __call__(self, xs, ys, inds=None):
-        if xs.ndim == 3:
-            preds = []
-            for i in range(xs.shape[0]):
-                preds.append(self.__call__(xs[i], ys[i], inds))  # recursively call on each sample
-            return torch.stack(preds, dim=0)
-
+    def _call_single(self, xs, ys, inds, b):
+        print(f"_call_single {b} called")
+        n_points = xs.shape[0]
         if inds is None:
-            inds = range(ys.shape[0])
+            inds = range(n_points)
 
-        preds = np.zeros(ys.shape[0])
+        preds = np.zeros(n_points)
         for i in inds:
             if i == 0:
-                preds[i] = np.zeros_like(ys[0])
+                preds[i] = 0.0
                 continue
-
             x_train, y_train = xs[:i], ys[:i]
-            x_test = xs[i].reshape(1, -1)
+            x_test = xs[i]
+            print(f"_call_single {b} fit call {i}")
+            params = self.fit(x_train, y_train)
+            print(f"_call_single {b} predict call {i}")
+            preds[i] = self.predict(x_test, params).item()
 
-            self.fit(x_train, y_train)
-            preds[i] = self.predict(x_test)
+        print(f"_call_single {b} returns")
+        return i, torch.tensor(preds).unsqueeze(0)
 
-        return torch.tensor(preds).unsqueeze(0)
+    def __call__(self, xs, ys, inds=None):
+        if isinstance(xs, torch.Tensor): xs = xs.cpu()
+        if isinstance(ys, torch.Tensor): ys = ys.cpu()
+        print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
+
+        if xs.ndim == 3:
+            i_s, results = Parallel(n_jobs=-1, backend="threading")(
+                delayed(self._call_single)(xs[i], ys[i], inds, i)
+                for i in range(xs.shape[0])
+            )
+            print(i_s)
+            return torch.cat(results, dim=0)
+        elif xs.ndim == 2:
+            return self._call_single(self, xs, ys, inds)
+        else:
+            raise ValueError("Input xs must be 2D or 3D tensor.")
+
+

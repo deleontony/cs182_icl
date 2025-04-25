@@ -2,7 +2,7 @@ inherit:
     - base.yaml
 
 training:
-    task: fourier_sine_regression
+    task: sum_sine_regression
     curriculum:
         points:
             start: 26
@@ -11,7 +11,7 @@ training:
             interval: 2000 
     resume_id: 1468ab06-745f-43e9-9795-77053ef5cabf
 
-out_dir: ../models/periodic/fourier_sine_regression
+out_dir: ../models/periodic/sum_sine_regression
 
 wandb:
     name: "fourier_sine_regression_standard"
