@@ -366,6 +366,8 @@ def baseline_names(name):
         return "MLP"
     if "scipy_sine" in name.lower():
         return f"SciPy Curve Fit: Sum of Sines"
+    if "torch_sine" in name.lower():
+        return f"Torch Curve Fit: Sum of Sines"
     return name
 
 
