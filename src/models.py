@@ -8,6 +8,7 @@ import warnings
 from sklearn import tree
 import xgboost as xgb
 import numpy as np
+import math
 
 from base_models import NeuralNetwork, ParallelNetworks
 
@@ -76,7 +77,9 @@ def get_relevant_baselines(task_name):
         # TODO: Set all properly
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
-            # (TorchSumSineModel, {}), # Fix this, so slow
+            (TorchSumSineModel, {}), # Fix this, so slow
+            (MLPModel,{}), #This will be slow.
+            (SIRENModel,{"input_size:"}), #THis will also be slow, add input size.
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -552,6 +555,99 @@ class MLPModel:
                         optimizer.step()
 
                     # Predict the next step
+                    test_x = xs[j, i:i+1].view(1, -1).float()
+                    model.eval()
+                    with torch.no_grad():
+                        y_pred = model(test_x)
+                        pred[j] = y_pred[0, 0].item()
+
+            preds.append(pred)
+
+        return torch.stack(preds, dim=1)
+
+# Sine activation with frequency scaling
+class Sine(nn.Module):
+    def __init__(self, w0=1.0):
+        super().__init__()
+        self.w0 = w0
+
+    def forward(self, x):
+        return torch.sin(self.w0 * x)
+
+# Initialization function for SIREN layers
+def siren_init(layer, w0=1.0):
+    with torch.no_grad():
+        num_input = layer.in_features
+        layer.weight.uniform_(-math.sqrt(6 / num_input) / w0, math.sqrt(6 / num_input) / w0)
+
+# Full SIREN network
+class SIREN(nn.Module):
+    def __init__(self, input_size, hidden_size=64, hidden_layers=2, w0=1.0, w0_initial=30.0):
+        super().__init__()
+
+        layers = []
+
+        # First layer with special frequency w0_initial
+        first_layer = nn.Linear(input_size, hidden_size)
+        siren_init(first_layer, w0_initial)
+        layers.append(first_layer)
+        layers.append(Sine(w0_initial))
+
+        # Hidden layers with standard w0
+        for _ in range(hidden_layers):
+            hidden_layer = nn.Linear(hidden_size, hidden_size)
+            siren_init(hidden_layer, w0)
+            layers.append(hidden_layer)
+            layers.append(Sine(w0))
+
+        # Final output layer (no activation)
+        final_layer = nn.Linear(hidden_size, 1)
+        siren_init(final_layer, w0)
+        layers.append(final_layer)
+
+        # Wrap in nn.Sequential
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+class SIRENModel:
+    def __init__(self):
+        self.name = "siren"
+    
+    def __call__(self, xs, ys, inds=None):
+        xs, ys = xs.cuda(), ys.cuda()
+        
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+
+        preds = []
+
+        for i in tqdm(inds):
+            pred = torch.zeros_like(ys[:, 0])
+            if i > 0:
+                for j in range(ys.shape[0]):
+                    train_xs, train_ys = xs[j, :i], ys[j, :i]
+
+                    input_size = train_xs.shape[1] if train_xs.ndim == 2 else 1
+                    train_xs = train_xs.view(-1, input_size).float()
+                    train_ys = train_ys.view(-1, 1).float()
+
+                    model = SIREN(input_size).cuda()
+                    criterion = nn.MSELoss()
+                    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+                    for epoch in range(50):
+                        model.train()
+                        optimizer.zero_grad()
+                        output = model(train_xs)
+                        loss = criterion(output, train_ys)
+                        loss.backward()
+                        optimizer.step()
+
                     test_x = xs[j, i:i+1].view(1, -1).float()
                     model.eval()
                     with torch.no_grad():
