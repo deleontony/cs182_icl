@@ -131,6 +131,44 @@ def gen_overlapping_train_test(data_sampler, n_points, b_size):
     return xs_train_pre, xs_test_post
 
 
+def gen_extrapolation(data_sampler, n_points, b_size, center=100, scale=1.0):
+    xs = data_sampler.sample_xs(n_points, b_size)
+    extrap_xs = torch.randn([b_size, 1, xs.shape[2]]) * scale + center
+    xs_combined = torch.cat([xs, extrap_xs], dim=1)
+    return xs_combined, None
+
+
+def eval_extrapolation_curve(
+    model, task_name, data_name, n_dims, n_points, batch_size, extrapolation_centers, data_sampler_kwargs={}, task_sampler_kwargs={}
+):
+    data_sampler = get_data_sampler(data_name, n_dims, **data_sampler_kwargs)
+    task_sampler = get_task_sampler(task_name, n_dims, batch_size, **task_sampler_kwargs)
+
+    all_center_metrics = {
+        "centers": extrapolation_centers,
+        "mean": [],
+        "std": [],
+        "bootstrap_low": [],
+        "bootstrap_high": [],
+    }
+
+    for center in extrapolation_centers:
+        all_metrics = []
+        for _ in range(20):
+            xs, xs_p = gen_extrapolation(data_sampler, 100, batch_size, center=center)
+            metrics = eval_batch(model, task_sampler, xs, xs_p)
+            all_metrics.append(metrics[:, -1].unsqueeze(1)) 
+
+        metrics = torch.cat(all_metrics, dim=0)
+        agg = aggregate_metrics(metrics)
+        all_center_metrics["mean"].append(agg["mean"][0])
+        all_center_metrics["std"].append(agg["std"][0])
+        all_center_metrics["bootstrap_low"].append(agg["bootstrap_low"][0])
+        all_center_metrics["bootstrap_high"].append(agg["bootstrap_high"][0])
+
+    return all_center_metrics
+
+
 def aggregate_metrics(metrics, bootstrap_trials=1000):
     """
     Takes as input a tensor of shape (num_eval, n_points) and returns a dict with
@@ -262,18 +300,24 @@ def build_evals(conf):
             evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
     # extreme amplitude scaling
-    for dim in ["y"]:
-        for scale in [10, 100]:
-            eigenvals = scale * torch.ones(n_dims)
-            scaling_args = {"task_sampler_kwargs": {"scale": scale}}
+    # for dim in ["y"]:
+    #     for scale in [10, 100]:
+    #         eigenvals = scale * torch.ones(n_dims)
+    #         scaling_args = {"task_sampler_kwargs": {"scale": scale}}
 
-            evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
+    #         evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
     if task_name == "linear_regression":
         evaluation_kwargs[f"noisyLR"] = {
             "task_sampler_kwargs": {"renormalize_ys": True, "noise_std": 1},
             "task_name": "noisy_linear_regression",
         }
+
+    evaluation_kwargs["extrapolation_curve"] = {
+        "prompting_strategy": "standard",
+        "extrapolation_centers": [5, 10, 15, 20, 30, 40, 60, 80, 100],
+        "use_extrapolation_eval": True,
+    }
 
     for name, kwargs in evaluation_kwargs.items():
         # allow kwargs to override base_kwargs values
@@ -299,7 +343,21 @@ def compute_evals(all_models, evaluation_kwargs, save_path=None, recompute=False
                 continue
             
             print(f"Computing Evaluation {eval_name} on Model {model.name}")
-            metrics[model.name] = eval_model(model, **kwargs)
+
+            if kwargs.pop("use_extrapolation_eval", False):
+                extrap_centers = kwargs.pop("extrapolation_centers")
+                curve_kwargs = {
+                    k: kwargs[k]
+                    for k in ["task_name", "data_name", "n_dims", "n_points", "batch_size", "data_sampler_kwargs", "task_sampler_kwargs"]
+                    if k in kwargs
+                }
+                center_metrics = eval_extrapolation_curve(
+                    model, extrapolation_centers=extrap_centers, **curve_kwargs
+                )
+                # center_metrics = eval_extrapolation_curve(model, extrapolation_centers=extrap_centers, **kwargs)
+                metrics[model.name] = center_metrics
+            else:
+                metrics[model.name] = eval_model(model, **kwargs)
         all_metrics[eval_name] = metrics
 
     if save_path is not None:

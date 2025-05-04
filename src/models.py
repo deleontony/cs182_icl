@@ -78,8 +78,8 @@ def get_relevant_baselines(task_name):
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
             (TorchSumSineModel, {}), # Fix this, so slow
-            (MLPModel,{}), #This will be slow.
-            (SIRENModel,{"input_size:"}), #THis will also be slow, add input size.
+            # (MLPModel,{}), #This will be slow.
+            # (SIRENModel,{}), #THis will also be slow, add input size.
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -763,7 +763,7 @@ class TorchSumSineModel:
     def __call__(self, xs, ys, inds=None):
         xs = xs.to(self.device)
         ys = ys.to(self.device)
-        print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
+        # print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
 
         if xs.ndim == 3:
             results = []
@@ -865,7 +865,7 @@ class ScipySumSineModel:
     def __call__(self, xs, ys, inds=None):
         if isinstance(xs, torch.Tensor): xs = xs.cpu()
         if isinstance(ys, torch.Tensor): ys = ys.cpu()
-        print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
+        # print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
 
         if xs.ndim == 3:
             i_s, results = Parallel(n_jobs=-1, backend="threading")(
