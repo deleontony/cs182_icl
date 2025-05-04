@@ -765,7 +765,7 @@ class PiecewiseLinearModel:
             out += torch.relu(biases[i] + weights[i] @ x)
         return out
 
-    def fit(self, x_train, y_train, epochs=100, lr=0.01):
+    def fit(self, x_train, y_train, epochs=10, lr=0.01):
         x_train = x_train.to(self.device)
         y_train = y_train.to(self.device)
 
