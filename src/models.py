@@ -751,75 +751,48 @@ class PiecewiseLinearModel:
         self.name = "piecewise_linear"
 
     def _piecewise_linear(self, x, weights, biases):
-        out = biases[0] + weights[0] * x
-        for i in range(1, self.num_relus):
-            out += torch.relu(biases[i] + weights[i] * x)
+        """
+        x: shape (n_points, n_dims)
+        weights: shape (n_dims, num_relus)
+        biases: shape (n_dims, num_relus)
+        returns: shape (n_points,)
+        """
+        n_points, n_dims = x.shape
+        out = biases[0] + weights[0] @ x  # Linear term for the first unit
+
+        # Add ReLU components
+        for i in range(1, self.num_relus):  # Additional ReLU terms
+            out += torch.relu(biases[i] + weights[i] @ x)
         return out
-
-    def fit_single_dimension(self, x, y, epochs=100, lr=0.01):
-        x = x.to(self.device)
-        y = y.to(self.device)
-
-        weights = nn.Parameter(torch.randn(self.num_relus, device=self.device) * 0.1)
-        biases = nn.Parameter(torch.randn(self.num_relus, device=self.device) * 0.1)
-
-        optimizer = optim.Adam([weights, biases], lr=lr)
-        loss_fn = nn.MSELoss()
-
-        for _ in range(epochs):
-            optimizer.zero_grad()
-            y_pred = self._piecewise_linear(x, weights, biases)
-            loss = loss_fn(y_pred, y)
-            loss.backward()
-            optimizer.step()
-
-        return weights.detach(), biases.detach()
 
     def fit(self, x_train, y_train, epochs=100, lr=0.01):
         x_train = x_train.to(self.device)
         y_train = y_train.to(self.device)
 
         n_points, n_dims = x_train.shape
-        weights_all = torch.zeros((n_dims, self.num_relus), device=self.device)
-        biases_all = torch.zeros((n_dims, self.num_relus), device=self.device)
-        preds = torch.zeros((n_points, n_dims), device=self.device)
 
-        residual = y_train.clone()  # Reset residual before both passes
+        weights = nn.Parameter(torch.randn(n_dims, self.num_relus, device=self.device) * 0.1)
+        biases = nn.Parameter(torch.randn(n_dims, self.num_relus, device=self.device) * 0.1)
 
-        for direction in ["forward", "backward"]:
-            if direction == "forward":
-                dim_order = range(n_dims)
-            else:
-                residual = y_train.clone()  # Reset residual before backward pass
-                dim_order = range(n_dims - 2, -1, -1)
+        optimizer = optim.Adam([weights, biases], lr=lr)
+        loss_fn = nn.MSELoss()
 
-            for dim in dim_order:
-                x = x_train[:, dim]
-                try:
-                    weights, biases = self.fit_single_dimension(x, residual, epochs=epochs, lr=lr)
-                except Exception:
-                    weights = torch.zeros(self.num_relus, device=self.device)
-                    biases = torch.zeros(self.num_relus, device=self.device)
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            y_pred = self._piecewise_linear(x_train, weights, biases)
+            loss = loss_fn(y_pred, y_train)
+            loss.backward()
+            optimizer.step()
 
-                pred = self._piecewise_linear(x, weights, biases)
-                residual -= pred
-
-                weights_all[dim] = weights
-                biases_all[dim] = biases
-                preds[:, dim] = pred
-
-        return weights_all, biases_all
+        return weights.detach(), biases.detach()
 
     def predict(self, x, params):
         x = x.to(self.device)
         if x.ndim == 1:
-            x = x.reshape(1, -1)
+            x = x.unsqueeze(0)
 
-        weights_all, biases_all = params
-        y_pred = torch.zeros(x.shape[0], device=self.device)
-        for dim in range(x.shape[1]):
-            y_pred += self._piecewise_linear(x[:, dim], weights_all[dim], biases_all[dim])
-        return y_pred
+        weights, biases = params
+        return self._piecewise_linear(x, weights, biases)
 
     def _call_single(self, xs, ys, inds, b):
         n_points = xs.shape[0]
@@ -835,9 +808,8 @@ class PiecewiseLinearModel:
                 preds[i] = 0.0
                 continue
             x_train, y_train = xs[:i], ys[:i]
-            x_test = xs[i]
-            if x_test.ndim == 0:
-                x_test = x_test.unsqueeze(0)
+            x_test = xs[i].unsqueeze(0) if xs[i].ndim == 1 else xs[i]
+
             params = self.fit(x_train, y_train)
             preds[i] = self.predict(x_test, params).item()
 
@@ -859,6 +831,7 @@ class PiecewiseLinearModel:
             return pred
         else:
             raise ValueError("Input xs must be 2D or 3D tensor.")
+
 
 
 class ScipySumSineModel:
