@@ -79,7 +79,7 @@ def get_relevant_baselines(task_name):
             (NNModel, {"n_neighbors": 3}),
             (TorchSumSineModel, {}), # Fix this, so slow
             (MLPModel,{}), #This will be slow.
-            (SIRENModel,{"input_size:"}), #THis will also be slow, add input size.
+            (SIRENModel,{}), #THis will also be slow
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
