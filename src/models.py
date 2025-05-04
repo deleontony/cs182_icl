@@ -76,7 +76,7 @@ def get_relevant_baselines(task_name):
         # TODO: Set all properly
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
-            # (TorchSumSineModel, {}), # Fix this, so slow
+            (TorchSumSineModel, {}), # Fix this, so slow
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -573,7 +573,7 @@ class TorchSumSineModel:
         self.name = "torch_sine_sum"
 
     def _single_sine(self,x,amp,freq,phase,offset):
-        return amp * np.sin((freq * x + phase) % (2 * np.pi)) + offset
+        return amp * torch.sin((freq * x + phase) % (2 * np.pi)) + offset
     
     def fit_single_dimension(self, x, y, epochs=100):
         x = x.to(self.device)
@@ -607,7 +607,7 @@ class TorchSumSineModel:
         phases = torch.zeros(n_dims, device=self.device)
         offsets = torch.zeros(n_dims, device=self.device)
 
-        preds = torch.zeros_like(y_train)
+        preds = torch.zeros((n_points, n_dims), device=self.device)
         for direction in ["forward","backward"]:
             if direction == "forward":
                 residual = y_train.clone()
@@ -644,7 +644,7 @@ class TorchSumSineModel:
         return y_pred
 
     def _call_single(self, xs, ys, inds, b):
-        print(f"_call_single {b} called")
+        # print(f"_call_single {b} called")
         n_points = xs.shape[0]
         if inds is None:
             inds = range(n_points)
@@ -656,12 +656,12 @@ class TorchSumSineModel:
                 continue
             x_train, y_train = xs[:i], ys[:i]
             x_test = xs[i]
-            print(f"_call_single {b} fit call {i}")
+            # print(f"_call_single {b} fit call {i}")
             params = self.fit(x_train, y_train)
-            print(f"_call_single {b} predict call {i}")
+            # print(f"_call_single {b} predict call {i}")
             preds[i] = self.predict(x_test, params).item()
 
-        print(f"_call_single {b} returns")
+        # print(f"_call_single {b} returns")
         return i, preds.unsqueeze(0)
 
     def __call__(self, xs, ys, inds=None):
