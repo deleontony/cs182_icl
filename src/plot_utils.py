@@ -42,30 +42,48 @@ relevant_model_names = {
         "Transformer",
         "3-Nearest Neighbors",
         "Torch Curve Fit: Sum of Sines",
+        "MLP",
+        "SIREN",
     ],
     "radial_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "linear_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "linear_modulo_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
+        "Piecewise Linear",
     ],
     "saw_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
+        "Piecewise Linear",
     ],
     "square_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
+        "Piecewise Linear",
     ],
     "triangle_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
+        "Piecewise Linear",
     ],
 }
 
