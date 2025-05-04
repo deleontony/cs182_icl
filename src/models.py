@@ -97,7 +97,8 @@ def get_relevant_baselines(task_name):
         ],
         "square_wave_regression": [
             (NNModel, {"n_neighbors": 3}),
-            (PiecewiseLinearModel,{"num_relus": 3}),
+            # (PiecewiseLinearModel,{"num_relus": 3}),
+            (PeriodicPiecewiseLinear, {"num_pieces": 2})
         ],
         "triangle_wave_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -743,6 +744,84 @@ class TorchSumSineModel:
             return pred
         else:
             raise ValueError("Input xs must be 2D or 3D tensor.")
+
+class PeriodicPiecewiseLinear(nn.Module):
+    def __init__(self, batch_size=64, input_dim=20, num_pieces=2, device='cuda' if torch.cuda.is_available() else 'cpu'):
+        super().__init__()
+        self.device = device
+        self.num_pieces = num_pieces
+        self.name = f"{num_pieces}_periodic_piecewise_linear"
+        self.batch_size = batch_size
+
+        self.w_proj = nn.Parameter(torch.randn(batch_size, input_dim, device=device))
+        self.b_proj = nn.Parameter(torch.randn(batch_size, 1, device=device))
+        self.raw_period = nn.Parameter(torch.log(torch.abs(torch.randn(batch_size, 1)) + 0.1))
+        self.slopes = nn.Parameter(torch.randn(batch_size, num_pieces, device=device))
+        self.intercepts = nn.Parameter(torch.randn(batch_size, num_pieces, device=device))
+    
+    def period(self):
+        return torch.exp(self.raw_period) + 1e-3
+
+    def forward(self, xs):
+        B, T, D = xs.shape
+        out = (xs * self.w_proj.unsqueeze(1)).sum(dim=2) + self.b_proj
+        out = torch.remainder(out, self.period())
+
+        piece_width = self.period() / self.num_pieces
+        piece_idx = torch.floor(out / piece_width).long().clamp(max=self.num_pieces - 1)
+
+        slopes = torch.gather(self.slopes, 1, piece_idx)
+        intercepts = torch.gather(self.intercepts, 1, piece_idx)
+
+        out = slopes * out + intercepts
+        return out
+
+    def fit(self, xs, ys, lr=1e-2, epochs=10):
+        self.train()
+        xs, ys = xs.to(self.device), ys.to(self.device)
+        optimizer = optim.Adam(self.parameters(), lr=lr)
+        loss_fn = nn.MSELoss()
+
+        for epoch in range(epochs):
+            optimizer.zero_grad()
+            preds = self.forward(xs)
+            loss = loss_fn(preds, ys)
+            loss.backward()
+            optimizer.step()
+        return self
+
+    def predict(self, xs):
+        self.eval()
+        xs = xs.to(self.device)
+        with torch.no_grad():
+            preds = self.forward(xs)
+        return preds
+
+    def __call__(self, xs, ys, lr=1e-2, epochs=10, inds=None):
+        if inds is None:
+            inds = range(ys.shape[1])
+        else:
+            if max(inds) >= ys.shape[1] or min(inds) < 0:
+                raise ValueError("inds contain indices where xs and ys are not defined")
+        xs, ys = xs.to(self.device), ys.to(self.device)
+        B, T, D = xs.shape
+        preds = []
+
+        for i in range(T):
+            if i == 0:
+                preds.append(torch.zeros(B, device=self.device))
+                continue
+
+            model_copy = PeriodicPiecewiseLinear(B, D, self.num_pieces, self.device).to(self.device)
+            model_copy.load_state_dict(self.state_dict())
+
+            model_copy.fit(xs[:, :i], ys[:, :i], lr=lr, epochs=epochs)
+
+            pred_i = model_copy.predict(xs[:, i:i+1]).squeeze(-1).squeeze(-1)
+            preds.append(pred_i)
+
+        return torch.stack(preds, dim=1)
+
 
 class PiecewiseLinearModel:
     def __init__(self, num_relus=2, device='cuda' if torch.cuda.is_available() else 'cpu'):
