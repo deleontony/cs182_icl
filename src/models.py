@@ -546,7 +546,7 @@ class MLPModel:
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
                     # Simple training loop
-                    for epoch in range(50):  # or use early stopping
+                    for epoch in range(10):  # or use early stopping
                         model.train()
                         optimizer.zero_grad()
                         output = model(train_xs)
@@ -640,7 +640,7 @@ class SIRENModel:
                     criterion = nn.MSELoss()
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-                    for epoch in range(50):
+                    for epoch in range(10):
                         model.train()
                         optimizer.zero_grad()
                         output = model(train_xs)
@@ -671,7 +671,7 @@ class TorchSumSineModel:
     def _single_sine(self,x,amp,freq,phase,offset):
         return amp * torch.sin((freq * x + phase) % (2 * np.pi)) + offset
     
-    def fit_single_dimension(self, x, y, epochs=100):
+    def fit_single_dimension(self, x, y, epochs=10):
         x = x.to(self.device)
         y = y.to(self.device)
 
