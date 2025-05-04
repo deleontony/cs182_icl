@@ -154,7 +154,8 @@ def eval_extrapolation_curve(
 
     for center in extrapolation_centers:
         all_metrics = []
-        for _ in range(20):
+        for i in range(20):
+            print(f"Evaluating batch {i + 1} of {20}")
             xs, xs_p = gen_extrapolation(data_sampler, 100, batch_size, center=center)
             metrics = eval_batch(model, task_sampler, xs, xs_p)
             all_metrics.append(metrics[:, -1].unsqueeze(1)) 
@@ -300,12 +301,12 @@ def build_evals(conf):
             evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
     # extreme amplitude scaling
-    # for dim in ["y"]:
-    #     for scale in [10, 100]:
-    #         eigenvals = scale * torch.ones(n_dims)
-    #         scaling_args = {"task_sampler_kwargs": {"scale": scale}}
+    for dim in ["y"]:
+        for scale in [10, 100]:
+            eigenvals = scale * torch.ones(n_dims)
+            scaling_args = {"task_sampler_kwargs": {"scale": scale}}
 
-    #         evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
+            evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
     if task_name == "linear_regression":
         evaluation_kwargs[f"noisyLR"] = {
@@ -315,7 +316,7 @@ def build_evals(conf):
 
     evaluation_kwargs["extrapolation_curve"] = {
         "prompting_strategy": "standard",
-        "extrapolation_centers": [5, 10, 15, 20, 30, 40, 60, 80, 100],
+        "extrapolation_centers": [0, 2, 5, 10, 15, 20, 30, 40, 60, 80, 100],
         "use_extrapolation_eval": True,
     }
 
@@ -344,8 +345,8 @@ def compute_evals(all_models, evaluation_kwargs, save_path=None, recompute=False
             
             print(f"Computing Evaluation {eval_name} on Model {model.name}")
 
-            if kwargs.pop("use_extrapolation_eval", False):
-                extrap_centers = kwargs.pop("extrapolation_centers")
+            if kwargs.get("use_extrapolation_eval", False):
+                extrap_centers = kwargs["extrapolation_centers"]
                 curve_kwargs = {
                     k: kwargs[k]
                     for k in ["task_name", "data_name", "n_dims", "n_points", "batch_size", "data_sampler_kwargs", "task_sampler_kwargs"]

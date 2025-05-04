@@ -77,7 +77,7 @@ def get_relevant_baselines(task_name):
         # TODO: Set all properly
         "sum_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
-            (TorchSumSineModel, {}), # Fix this, so slow
+            # (TorchSumSineModel, {}), # Fix this, so slow
             # (MLPModel,{}), #This will be slow.
             # (SIRENModel,{}), #THis will also be slow, add input size.
         ],

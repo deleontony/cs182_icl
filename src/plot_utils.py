@@ -41,9 +41,9 @@ relevant_model_names = {
     "sum_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
-        "Torch Curve Fit: Sum of Sines",
-        "MLP",
-        "SIREN",
+        # "Torch Curve Fit: Sum of Sines",
+        # "MLP",
+        # "SIREN",
     ],
     "radial_sine_regression": [
         "Transformer",
@@ -88,7 +88,8 @@ relevant_model_names = {
 }
 
 
-def basic_plot(metrics, models=None, trivial=1.0):
+def basic_plot(metrics, models=None, trivial=1.0, is_extrapolation=False):
+    extrapolation_centers = [0, 2, 5, 10, 15, 20, 30, 40, 60, 80, 100]
     fig, ax = plt.subplots(1, 1)
 
     if models is not None:
@@ -99,12 +100,19 @@ def basic_plot(metrics, models=None, trivial=1.0):
     color = 0
     ax.axhline(trivial, ls="--", color="gray")
     for name, vs in metrics.items():
-        ax.plot(vs["mean"], "-", label=name, color=palette[color % 10], lw=2)
         low = vs["bootstrap_low"]
         high = vs["bootstrap_high"]
-        ax.fill_between(range(len(low)), low, high, alpha=0.3)
+        if is_extrapolation:
+            ax.plot(extrapolation_centers ,vs["mean"], "-", label=name, color=palette[color % 10], lw=2)
+            # ax.fill_between(extrapolation_centers, range(len(low)), low, high, alpha=0.3)
+        else:
+            ax.plot(vs["mean"], "-", label=name, color=palette[color % 10], lw=2)
+            ax.fill_between(range(len(low)), low, high, alpha=0.3)
         color += 1
-    ax.set_xlabel("in-context examples")
+    if is_extrapolation:
+        ax.set_xlabel("shift in x")
+    else:
+        ax.set_xlabel("in-context examples")
     ax.set_ylabel("squared error")
     ax.set_xlim(-1, len(low) + 0.1)
     ax.set_ylim(-0.1, 1.25)
