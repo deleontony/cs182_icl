@@ -821,25 +821,28 @@ class PiecewiseLinearModel:
         biases_all = torch.zeros((n_dims, self.num_relus), device=self.device)
         preds = torch.zeros((n_points, n_dims), device=self.device)
 
+        residual = y_train.clone()  # Reset residual before both passes
+
         for direction in ["forward", "backward"]:
             if direction == "forward":
-                residual = y_train.clone()
                 dim_order = range(n_dims)
             else:
+                residual = y_train.clone()  # Reset residual before backward pass
                 dim_order = range(n_dims - 2, -1, -1)
 
             for dim in dim_order:
-                residual += preds[:, dim]
                 x = x_train[:, dim]
                 try:
                     weights, biases = self.fit_single_dimension(x, residual, epochs=epochs, lr=lr)
                 except Exception:
-                    weights, biases = torch.zeros(self.num_relus), torch.zeros(self.num_relus)
+                    weights = torch.zeros(self.num_relus, device=self.device)
+                    biases = torch.zeros(self.num_relus, device=self.device)
+
+                pred = self._piecewise_linear(x, weights, biases)
+                residual -= pred
 
                 weights_all[dim] = weights
                 biases_all[dim] = biases
-                pred = self._piecewise_linear(x, weights, biases)
-                residual -= pred
                 preds[:, dim] = pred
 
         return weights_all, biases_all
@@ -860,16 +863,22 @@ class PiecewiseLinearModel:
         if inds is None:
             inds = range(n_points)
 
-        preds = torch.zeros(n_points)
+        preds = torch.zeros(n_points, device=self.device)
+        last_i = -1
+
         for i in inds:
+            last_i = i
             if i == 0:
                 preds[i] = 0.0
                 continue
             x_train, y_train = xs[:i], ys[:i]
             x_test = xs[i]
+            if x_test.ndim == 0:
+                x_test = x_test.unsqueeze(0)
             params = self.fit(x_train, y_train)
             preds[i] = self.predict(x_test, params).item()
-        return i, preds.unsqueeze(0)
+
+        return last_i, preds.unsqueeze(0)
 
     def __call__(self, xs, ys, inds=None):
         xs = xs.to(self.device)
