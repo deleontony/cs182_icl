@@ -41,6 +41,7 @@ relevant_model_names = {
     "sum_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "Torch Curve Fit: Sum of Sines",
         "MLP",
         "SIREN",
     ],
@@ -88,6 +89,8 @@ def basic_plot(metrics, models=None, trivial=1.0):
 
     if models is not None:
         metrics = {k: metrics[k] for k in models}
+    print(models)
+    print(metrics.keys())
 
     color = 0
     ax.axhline(trivial, ls="--", color="gray")
