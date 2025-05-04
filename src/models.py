@@ -79,7 +79,7 @@ def get_relevant_baselines(task_name):
             (NNModel, {"n_neighbors": 3}),
             # (TorchSumSineModel, {}), # Fix this, so slow
             (MLPModel,{}), #This will be slow.
-            # (SIRENModel,{}), #THis will also be slow, add input size.
+            (SIRENModel,{}), #THis will also be slow
         ],
         "radial_sine_regression": [
             (NNModel, {"n_neighbors": 3}),
@@ -89,15 +89,19 @@ def get_relevant_baselines(task_name):
         ],
         "linear_modulo_regression": [
             (NNModel, {"n_neighbors": 3}),
+            (PiecewiseLinearModel,{"num_relus": 1}),
         ],
         "saw_regression": [
             (NNModel, {"n_neighbors": 3}),
+            (PiecewiseLinearModel,{"num_relus": 1}),
         ],
         "square_wave_regression": [
             (NNModel, {"n_neighbors": 3}),
+            (PiecewiseLinearModel,{"num_relus": 3}),
         ],
         "triangle_wave_regression": [
             (NNModel, {"n_neighbors": 3}),
+            (PiecewiseLinearModel,{"num_relus": 2}),
         ],
     }
 
@@ -547,7 +551,7 @@ class MLPModel:
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
                     # Simple training loop
-                    for epoch in range(50):  # or use early stopping
+                    for epoch in range(10):  # or use early stopping
                         model.train()
                         optimizer.zero_grad()
                         output = model(train_xs)
@@ -641,7 +645,7 @@ class SIRENModel:
                     criterion = nn.MSELoss()
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-                    for epoch in range(50):
+                    for epoch in range(10):
                         model.train()
                         optimizer.zero_grad()
                         output = model(train_xs)
@@ -672,7 +676,7 @@ class TorchSumSineModel:
     def _single_sine(self,x,amp,freq,phase,offset):
         return amp * torch.sin((freq * x + phase) % (2 * np.pi)) + offset
     
-    def fit_single_dimension(self, x, y, epochs=100):
+    def fit_single_dimension(self, x, y, epochs=10,lr = 0.01):
         x = x.to(self.device)
         y = y.to(self.device)
 
@@ -710,10 +714,11 @@ class TorchSumSineModel:
                 residual = y_train.clone()
                 dim_order = range(n_dims)
             else:
-                dim_order = range(n_dims-2,-1,-1)
+                dim_order = range(n_dims-1,-1,-1)
             
             for dim in dim_order:
-                residual += preds[:,dim]
+                if direction == "backward":
+                    residual += preds[:, dim]
                 x = x_train[:,dim]
             
                 try:
@@ -774,6 +779,122 @@ class TorchSumSineModel:
             return torch.cat(results,dim=0)
         elif xs.ndim == 2:
             _, pred = self._call_single(xs, ys, inds,0)
+            return pred
+        else:
+            raise ValueError("Input xs must be 2D or 3D tensor.")
+
+class PiecewiseLinearModel:
+    def __init__(self, num_relus=2, device='cuda' if torch.cuda.is_available() else 'cpu'):
+        self.device = device
+        self.num_relus = num_relus
+        self.name = "piecewise_linear"
+
+    def _piecewise_linear(self, x, weights, biases):
+        out = biases[0] + weights[0] * x
+        for i in range(1, self.num_relus):
+            out += torch.relu(biases[i] + weights[i] * x)
+        return out
+
+    def fit_single_dimension(self, x, y, epochs=100, lr=0.01):
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        weights = nn.Parameter(torch.randn(self.num_relus, device=self.device) * 0.1)
+        biases = nn.Parameter(torch.randn(self.num_relus, device=self.device) * 0.1)
+
+        optimizer = optim.Adam([weights, biases], lr=lr)
+        loss_fn = nn.MSELoss()
+
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            y_pred = self._piecewise_linear(x, weights, biases)
+            loss = loss_fn(y_pred, y)
+            loss.backward()
+            optimizer.step()
+
+        return weights.detach(), biases.detach()
+
+    def fit(self, x_train, y_train, epochs=100, lr=0.01):
+        x_train = x_train.to(self.device)
+        y_train = y_train.to(self.device)
+
+        n_points, n_dims = x_train.shape
+        weights_all = torch.zeros((n_dims, self.num_relus), device=self.device)
+        biases_all = torch.zeros((n_dims, self.num_relus), device=self.device)
+        preds = torch.zeros((n_points, n_dims), device=self.device)
+
+        residual = y_train.clone()  # Reset residual before both passes
+
+        for direction in ["forward", "backward"]:
+            if direction == "forward":
+                dim_order = range(n_dims)
+            else:
+                residual = y_train.clone()  # Reset residual before backward pass
+                dim_order = range(n_dims - 2, -1, -1)
+
+            for dim in dim_order:
+                x = x_train[:, dim]
+                try:
+                    weights, biases = self.fit_single_dimension(x, residual, epochs=epochs, lr=lr)
+                except Exception:
+                    weights = torch.zeros(self.num_relus, device=self.device)
+                    biases = torch.zeros(self.num_relus, device=self.device)
+
+                pred = self._piecewise_linear(x, weights, biases)
+                residual -= pred
+
+                weights_all[dim] = weights
+                biases_all[dim] = biases
+                preds[:, dim] = pred
+
+        return weights_all, biases_all
+
+    def predict(self, x, params):
+        x = x.to(self.device)
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+
+        weights_all, biases_all = params
+        y_pred = torch.zeros(x.shape[0], device=self.device)
+        for dim in range(x.shape[1]):
+            y_pred += self._piecewise_linear(x[:, dim], weights_all[dim], biases_all[dim])
+        return y_pred
+
+    def _call_single(self, xs, ys, inds, b):
+        n_points = xs.shape[0]
+        if inds is None:
+            inds = range(n_points)
+
+        preds = torch.zeros(n_points, device=self.device)
+        last_i = -1
+
+        for i in inds:
+            last_i = i
+            if i == 0:
+                preds[i] = 0.0
+                continue
+            x_train, y_train = xs[:i], ys[:i]
+            x_test = xs[i]
+            if x_test.ndim == 0:
+                x_test = x_test.unsqueeze(0)
+            params = self.fit(x_train, y_train)
+            preds[i] = self.predict(x_test, params).item()
+
+        return last_i, preds.unsqueeze(0)
+
+    def __call__(self, xs, ys, inds=None):
+        xs = xs.to(self.device)
+        ys = ys.to(self.device)
+        print(f"xs.shape = {xs.shape}\nys.shape = {ys.shape}")
+
+        if xs.ndim == 3:
+            results = []
+            for i in range(xs.shape[0]):
+                _, pred = self._call_single(xs[i], ys[i], inds, i)
+                results.append(pred)
+            return torch.cat(results, dim=0)
+        elif xs.ndim == 2:
+            _, pred = self._call_single(xs, ys, inds, 0)
             return pred
         else:
             raise ValueError("Input xs must be 2D or 3D tensor.")

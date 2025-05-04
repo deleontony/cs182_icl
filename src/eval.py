@@ -261,6 +261,14 @@ def build_evals(conf):
 
             evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
 
+    # extreme amplitude scaling
+    for dim in ["y"]:
+        for scale in [10, 100]:
+            eigenvals = scale * torch.ones(n_dims)
+            scaling_args = {"task_sampler_kwargs": {"scale": scale}}
+
+            evaluation_kwargs[f"scale-{dim}={scale}"] = scaling_args
+
     if task_name == "linear_regression":
         evaluation_kwargs[f"noisyLR"] = {
             "task_sampler_kwargs": {"renormalize_ys": True, "noise_std": 1},
@@ -364,10 +372,14 @@ def baseline_names(name):
         return "XGBoost"
     if "mlp" in name.lower():
         return "MLP"
+    if "siren" in name.lower():
+        return "SIREN"
     if "scipy_sine" in name.lower():
         return f"SciPy Curve Fit: Sum of Sines"
     if "torch_sine" in name.lower():
         return f"Torch Curve Fit: Sum of Sines"
+    if "piecewise" in name.lower():
+        return f"Piecewise Linear"
     return name
 
 
