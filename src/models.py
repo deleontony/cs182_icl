@@ -545,7 +545,8 @@ class MLPModel:
                     train_xs = train_xs.view(-1, input_size).float()
                     train_ys = train_ys.view(-1, 1).float()
 
-                    model = MLP(input_size).cuda()
+                    model = MLP(input_size)
+                    model = model.to(xs.device)
                     criterion = nn.MSELoss()
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
