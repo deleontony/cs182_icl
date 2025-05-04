@@ -545,7 +545,7 @@ class MLPModel:
                     train_xs = train_xs.view(-1, input_size).float()
                     train_ys = train_ys.view(-1, 1).float()
 
-                    model = MLP(input_size)
+                    model = MLP(input_size).cuda()
                     criterion = nn.MSELoss()
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -675,7 +675,7 @@ class TorchSumSineModel:
     def _single_sine(self,x,amp,freq,phase,offset):
         return amp * torch.sin((freq * x + phase) % (2 * np.pi)) + offset
     
-    def fit_single_dimension(self, x, y, epochs=10):
+    def fit_single_dimension(self, x, y, epochs=10,lr = 0.01):
         x = x.to(self.device)
         y = y.to(self.device)
 
@@ -713,10 +713,11 @@ class TorchSumSineModel:
                 residual = y_train.clone()
                 dim_order = range(n_dims)
             else:
-                dim_order = range(n_dims-2,-1,-1)
+                dim_order = range(n_dims-1,-1,-1)
             
             for dim in dim_order:
-                residual += preds[:,dim]
+                if direction == "backward":
+                    residual += preds[:, dim]
                 x = x_train[:,dim]
             
                 try:
