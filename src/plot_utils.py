@@ -41,30 +41,44 @@ relevant_model_names = {
     "sum_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "radial_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "linear_sine_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "linear_modulo_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "saw_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "square_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
     "triangle_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
+        "MLP",
+        "SIREN",
     ],
 }
 
