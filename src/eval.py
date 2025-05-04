@@ -378,6 +378,8 @@ def baseline_names(name):
         return f"SciPy Curve Fit: Sum of Sines"
     if "torch_sine" in name.lower():
         return f"Torch Curve Fit: Sum of Sines"
+    if "piecewise" in name.lower():
+        return f"Piecewise Linear"
     return name
 
 

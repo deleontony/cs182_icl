@@ -62,24 +62,28 @@ relevant_model_names = {
         "3-Nearest Neighbors",
         "MLP",
         "SIREN",
+        "Piecewise Linear",
     ],
     "saw_regression": [
         "Transformer",
         "3-Nearest Neighbors",
         "MLP",
         "SIREN",
+        "Piecewise Linear",
     ],
     "square_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
         "MLP",
         "SIREN",
+        "Piecewise Linear",
     ],
     "triangle_wave_regression": [
         "Transformer",
         "3-Nearest Neighbors",
         "MLP",
         "SIREN",
+        "Piecewise Linear",
     ],
 }
 
